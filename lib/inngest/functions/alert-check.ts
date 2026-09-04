@@ -3,6 +3,7 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { inngest } from "@/lib/inngest/client";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { sendAlertEmail } from "@/lib/email/send-alert-email";
+import { isTriggered, onCooldown } from "@/lib/alerts/evaluate";
 import type { AlertType } from "@/lib/alerts/types";
 
 /**
@@ -16,7 +17,7 @@ import type { AlertType } from "@/lib/alerts/types";
  * never blocks alert delivery for symbols that already have fresh data.
  */
 
-interface AlertRecord {
+export interface AlertRecord {
   id: string;
   user_id: string;
   symbol: string;
@@ -27,27 +28,10 @@ interface AlertRecord {
   cooldown_minutes: number;
 }
 
-interface LatestReading {
+export interface LatestReading {
   price: number;
   volume: number | null;
   fetched_at: string;
-}
-
-function isTriggered(alert: AlertRecord, reading: LatestReading): boolean {
-  switch (alert.alert_type) {
-    case "price_above":
-      return reading.price >= alert.threshold;
-    case "price_below":
-      return reading.price <= alert.threshold;
-    case "volume_above":
-      return reading.volume !== null && reading.volume >= alert.threshold;
-  }
-}
-
-function onCooldown(alert: AlertRecord, now: number): boolean {
-  if (!alert.last_triggered_at) return false;
-  const elapsedMs = now - new Date(alert.last_triggered_at).getTime();
-  return elapsedMs < alert.cooldown_minutes * 60_000;
 }
 
 async function resolveEmail(userId: string): Promise<string | null> {

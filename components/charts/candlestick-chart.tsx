@@ -104,13 +104,18 @@ export default function CandlestickChart({
         if (!cancelled) setState("error");
       });
 
+    let resizeTimer: ReturnType<typeof setTimeout> | undefined;
     const resize = () => {
-      if (containerRef.current) chartRef.current?.applyOptions({ width: containerRef.current.clientWidth });
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        if (containerRef.current) chartRef.current?.applyOptions({ width: containerRef.current.clientWidth });
+      }, 100);
     };
     window.addEventListener("resize", resize);
 
     return () => {
       cancelled = true;
+      clearTimeout(resizeTimer);
       window.removeEventListener("resize", resize);
       chartRef.current?.remove();
       chartRef.current = null;

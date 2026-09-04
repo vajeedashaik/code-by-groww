@@ -83,7 +83,20 @@ the per-article reasoning.
 > it's isolated here, capped, and if it fails it just says 'unavailable' —
 > it never touches the deterministic score."
 
-## 6. Reliability (~40s)
+## 6. Alerts & company insights (~25s)
+
+> "Two more things that don't show up in the digest itself. Every stock can
+> carry a price or volume alert — [SYMBOL] has one set right here — that's a
+> real cooldown-gated email via Resend when it fires, not just a UI toggle.
+> And clicking through to a stock's own page pulls real company data:
+> analyst ratings, key metrics, news sentiment, plus a full candlestick
+> chart with 1M/3M/6M/1Y ranges."
+
+On `/watchlist`, point at the **Alerts** button's active-count badge on one
+row. Click through to `/stocks/[SYMBOL]` for two or three seconds to show
+the insights layout, then go back.
+
+## 7. Reliability (~40s)
 
 Point at a staleness badge next to a price ("updated 4 minutes ago" —
 neutral tone; explain FRESH/DELAYED read the same, calm, because that's
@@ -101,7 +114,7 @@ one-line summary.
 > instead of pretending to be fresh. Disagreeing sources are shown side by
 > side instead of averaged into a fake consensus number."
 
-## 7. Closing line (~15s)
+## 8. Closing line (~15s)
 
 > "This isn't another dashboard with more charts. It's the one piece of
 > state most market apps throw away between visits — what you already
@@ -119,13 +132,17 @@ one-line summary.
 | The return | 45s |
 | Explain one change | 60s |
 | Thesis | 45s |
+| Alerts & company insights | 25s |
 | Reliability | 40s |
 | Closing line | 15s |
-| **Total** | **~4m15s** |
+| **Total** | **~4m40s** |
 
 Leaves headroom in most hackathon slots for 1-2 follow-up questions. If your
-slot is shorter, cut section 6 (Reliability) to just the staleness badge —
-conflict + Time Machine become "ask me about it" material, not core path.
+slot is shorter, cut section 6 (Alerts & company insights) first — it's the
+newest addition and the least load-bearing for the core "memory and
+attention" pitch. If you need to cut further, trim section 7 (Reliability)
+to just the staleness badge — conflict + Time Machine become "ask me about
+it" material, not core path.
 
 ## Likely hard questions — have 1-2 sentence answers ready, don't improvise
 

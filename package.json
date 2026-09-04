@@ -12,7 +12,8 @@
     "verify:scoring": "tsx scripts/verify-scoring.ts",
     "verify:digest": "tsx scripts/verify-digest.ts",
     "verify:thesis": "tsx scripts/verify-thesis.ts",
-    "verify:reconcile": "tsx scripts/verify-reconcile.ts"
+    "verify:reconcile": "tsx scripts/verify-reconcile.ts",
+    "verify:alerts": "tsx scripts/verify-alerts.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.6",

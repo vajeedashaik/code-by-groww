@@ -42,8 +42,10 @@ export function DotPattern({
   const id = useId();
   const containerRef = useRef<SVGSVGElement>(null);
   const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+  const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
     const updateDimensions = () => {
       if (containerRef.current) {
         const rect = containerRef.current.getBoundingClientRect();
@@ -59,7 +61,10 @@ export function DotPattern({
   const rows = Math.max(1, Math.ceil(dimensions.height / height));
 
   const twinkleDots = useMemo(() => {
-    if (!glow) return [];
+    // Skip on the server and on the first client render (pre-hydration) —
+    // Math.random() would pick different values each time and desync from
+    // the SSR-ed markup, breaking hydration.
+    if (!glow || !mounted) return [];
     const total = cols * rows;
     const count = Math.min(TWINKLE_COUNT, total);
     const picked = new Set<number>();
@@ -79,7 +84,7 @@ export function DotPattern({
     // Only re-pick when the grid actually resizes — a random set is fine to
     // keep across re-renders, it doesn't need to track every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cols, rows, glow]);
+  }, [cols, rows, glow, mounted]);
 
   return (
     <svg

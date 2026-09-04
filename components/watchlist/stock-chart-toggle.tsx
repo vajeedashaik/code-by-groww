@@ -3,12 +3,18 @@
 import { useState } from "react";
 import CandlestickChart from "@/components/charts/candlestick-chart";
 
-/** Inline chart reveal for a watchlist row — same lazy-mount pattern as StockCard's Chart toggle. */
+/**
+ * Inline chart reveal for a watchlist row — same lazy-mount pattern as
+ * StockCard's Chart toggle, open by default so every stock lands with its
+ * chart visible. The panel is a separate flex item (order-last + basis-full)
+ * so it wraps onto its own full-width line below the button row and can be
+ * centered independently of the button's own width.
+ */
 export default function StockChartToggle({ symbol }: { symbol: string }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
   return (
-    <div>
+    <>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -17,10 +23,12 @@ export default function StockChartToggle({ symbol }: { symbol: string }) {
         {open ? "Hide chart" : "Chart"}
       </button>
       {open && (
-        <div className="mx-auto mt-3 w-full max-w-xl">
-          <CandlestickChart symbol={symbol} height={240} />
+        <div className="order-last mt-3 w-full basis-full">
+          <div className="mx-auto w-full max-w-xl">
+            <CandlestickChart symbol={symbol} height={240} />
+          </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

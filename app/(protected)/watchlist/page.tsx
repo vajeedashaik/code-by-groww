@@ -8,6 +8,7 @@ import TimeMachine from "@/components/watchlist/time-machine";
 import StockChartToggle from "@/components/watchlist/stock-chart-toggle";
 import ManageAlerts from "@/components/watchlist/manage-alerts";
 import { WatchlistDiffsProvider, DiffLine } from "@/components/watchlist/diff-panel";
+import DigestView from "@/components/digest/digest-view";
 import GlassCard from "@/components/ui/glass-card";
 import type { AlertRow, AlertType } from "@/lib/alerts/types";
 
@@ -139,18 +140,18 @@ export default async function WatchlistPage() {
   }
   const alertsBySymbol = groupAlertsBySymbol(alertRows ?? []);
 
+  const digestItems = items.map((item) => ({
+    symbol: item.symbol,
+    companyName: item.company_name,
+  }));
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
         <h1 className="font-display text-2xl font-semibold text-white">Your watchlist</h1>
         <p className="text-sm text-white/50">
-          Search a stock, add it with an optional thesis, and it stays here —
+          Your digest, your positions, and every stock&apos;s chart — all in one place,
           synced to your account.
-        </p>
-        <p className="mt-2 text-sm">
-          <Link href="/dashboard" className="text-white/45 underline decoration-white/20 underline-offset-4 hover:text-white/80">
-            Back to digest
-          </Link>
         </p>
       </div>
 
@@ -175,8 +176,18 @@ export default async function WatchlistPage() {
 
       {items.length > 0 && (
         <WatchlistDiffsProvider>
-          <GlassCard className="divide-y divide-white/5 p-0">
-            {items.map((item) => {
+          <div className="space-y-8">
+            <DigestView items={digestItems} />
+
+            <div>
+              <h2 className="font-display text-lg font-semibold text-white">Manage positions</h2>
+              <p className="text-sm text-white/50">
+                Thesis, alerts, and charts for every stock you&apos;re tracking.
+              </p>
+            </div>
+
+            <GlassCard className="divide-y divide-white/5 p-0">
+              {items.map((item) => {
               const snap = priceBySymbol.get(item.symbol);
               return (
                 <div key={item.id} className="p-4 transition-colors hover:bg-white/[0.02] sm:p-5">
@@ -207,15 +218,6 @@ export default async function WatchlistPage() {
                       <p className="mt-1.5">
                         <DiffLine symbol={item.symbol} />
                       </p>
-                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
-                        <StockChartToggle symbol={item.symbol} />
-                        <TimeMachine symbol={item.symbol} />
-                        <ManageAlerts
-                          symbol={item.symbol}
-                          companyName={item.company_name}
-                          alerts={alertsBySymbol.get(item.symbol) ?? []}
-                        />
-                      </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <PriceCell
@@ -226,10 +228,20 @@ export default async function WatchlistPage() {
                       <RemoveStockButton id={item.id} symbol={item.symbol} />
                     </div>
                   </div>
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                    <StockChartToggle symbol={item.symbol} />
+                    <TimeMachine symbol={item.symbol} />
+                    <ManageAlerts
+                      symbol={item.symbol}
+                      companyName={item.company_name}
+                      alerts={alertsBySymbol.get(item.symbol) ?? []}
+                    />
+                  </div>
                 </div>
               );
             })}
-          </GlassCard>
+            </GlassCard>
+          </div>
         </WatchlistDiffsProvider>
       )}
     </div>

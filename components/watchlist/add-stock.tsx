@@ -116,7 +116,7 @@ export default function AddStock() {
           id="stock-search"
           type="text"
           autoComplete="off"
-          placeholder="Search a stock — e.g. Infosys, TCS, RELIANCE.NS"
+          placeholder="Search a stock — e.g. Infosys, RELIANCE.NS"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => {

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      # Dummy values so `next build` can statically evaluate Clerk's env
+      # schema and prerender public pages — no real service is called at
+      # build time. Never used to reach a live Clerk/Supabase/Finnhub/Gemini
+      # account.
+      # Clerk validates the publishable key's format client-side even at
+      # build time (base64url-decodes to "<frontend-api-domain>$"), so a
+      # plain placeholder string fails `next build` outright — this decodes
+      # to "example-app-12.clerk.accounts.dev$", confirmed locally to pass
+      # Clerk's format check while never resolving to a real account.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ZXhhbXBsZS1hcHAtMTIuY2xlcmsuYWNjb3VudHMuZGV2JA==
+      CLERK_SECRET_KEY: sk_test_ci_00000000000000000000000000000000000000
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: /sign-in
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: /sign-up
+      NEXT_PUBLIC_CLERK_SIGN_IN_FALLBACK_REDIRECT_URL: /dashboard
+      NEXT_PUBLIC_CLERK_SIGN_UP_FALLBACK_REDIRECT_URL: /dashboard
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-anon-key
+      SUPABASE_SERVICE_ROLE_KEY: ci-placeholder-service-role-key
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run verify:scoring
+      - run: npm run verify:digest
+      - run: npm run verify:thesis
+      - run: npm run verify:reconcile
+      - run: npm run verify:alerts

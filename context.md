@@ -4,14 +4,135 @@ Living status doc. Update at the end of each phase.
 
 ## Overview
 
-Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
+Smart market watchlist web app. 72-hour solo hackathon, 10 phases.
 
 **Stack:** Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk (auth) · Supabase (Postgres + RLS) · Inngest (scheduled jobs) · yahoo-finance2 + Finnhub (market data).
 
 **Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4
 Seen-State/Diffing → 5 Meaningfulness Engine → 6 Digest UI → 7 Thesis + AI
 Relevance → 8 Staleness/Conflict Handling + Time Machine → 9 Polish + Demo
-Prep.
+Prep → 10 Retroactive Alerts/Insights Documentation + Hardening.
+
+## Current state — Phase 10: Retroactive Documentation, Review & Hardening (CODE-LEVEL WORK DONE, pending browser/perf/CI-push/rehearsal — the last phase)
+
+Closes a real gap: `ddb65f7` ("Preview-1") landed a full visual redesign
+plus three genuinely new, working features — price/volume email alerts,
+company insights (`/stocks/[symbol]`), and real candlestick charts — in one
+commit, with none of the design-doc/plan/code-review discipline every
+earlier phase got. Built directly against a fully-specified `phase10.md`
+(same approach as Phases 6-9: the brief already named exact files and exact
+problems from an external audit, so tasks were executed directly rather
+than via subagent dispatch — this session's context already spanned the
+whole codebase from prior work in it, so a fresh-subagent-per-task split
+would have mostly re-derived context already held, not added rigor).
+No new product scope, per `phase10.md`'s own explicit rule.
+
+### What was done (Phase 10)
+
+| Area | What |
+| --- | --- |
+| Retroactive design doc | `docs/superpowers/specs/2026-09-05-phase10-alerts-insights-design.md` — what alerts/insights/candlestick charts actually do, decided, and trade off, written after the fact to match every earlier phase's documentation bar |
+| Code review | Ran against the four specific concerns `phase10.md` named: `onCooldown()` off-by-one/timezone (no bug — both sides of the comparison are UTC epoch ms, boundary is intentionally inclusive), `createAlert`'s 60-min default as an unenforced "minimum" (confirmed gap, but unreachable today — no UI passes a custom cooldown yet; documented, not fixed, per this project's "don't validate scenarios that can't happen" convention), `getCompanyInsights`'s `cache()` cross-user risk (none — React's `cache()` is request-scoped memoization, not a persistent store, and the underlying Finnhub data isn't user-specific anyway), `resolveEmail()`'s multi-email fallback (theoretical, unreproduced with this app's actual Clerk sign-in flows, fails safe on error). Full writeup in the design doc above. **Nothing Important/Critical found** |
+| Pure-logic extraction | `lib/alerts/evaluate.ts` (new) — `isTriggered()`/`onCooldown()` moved out of `lib/inngest/functions/alert-check.ts` into a dependency-free pure module, mirroring `lib/market-data/reconcile.ts`'s and `lib/thesis/trigger.ts`'s existing "pure lib, thin orchestration wrapper" split. Required, not cosmetic — `alert-check.ts` imports `server-only` plus Clerk/Supabase/Inngest, so its logic was not importable by a standalone script without this split; discovered when `scripts/verify-alerts.ts` first failed to import it |
+| `scripts/verify-alerts.ts` (new) | `npm run verify:alerts` — 14 checks: `isTriggered()`'s three alert types (boundary-inclusive `>=`/`<=` for price, plus the `volume === null` never-triggers case), `onCooldown()`'s boundary (1s before/at/1s after the cooldown window, plus the never-triggered-before case). Same `tsx`, no-I/O, pass/fail-count pattern as the other four `verify:*` scripts |
+| `context.md` (this file) | This section — closes the "silent after Phase 9" gap the brief called out |
+| Backdrop/dot-grid perf fix | **Already done before this phase started** — `git log` shows it landed in a separate commit (`1697719`, "perf: replace per-dot Framer Motion nodes with static SVG pattern fill") sometime after Phase 9 but before this session picked up `phase10.md`. Verified against the brief's own description: `components/magicui/dot-pattern.tsx` already renders the grid as one tiled SVG `<pattern>` fill plus a fixed `TWINKLE_COUNT = 20` subset animated via a real CSS `@keyframes dot-twinkle` (`app/globals.css`), not per-dot Framer Motion; `components/ui/backdrop.tsx`'s two ambient blobs are already pure CSS `animate-float` at `blur-[100px]` (already trimmed from the brief's cited 140px). No further change needed here |
+| Candlestick chart resize debounce | `components/charts/candlestick-chart.tsx` — the one part of task 2 not already done. Its `window.resize` listener now debounces 100ms (`setTimeout`/`clearTimeout`, cleared on unmount) before calling `chart.applyOptions()`, so multiple chart instances open at once do bounded work per resize instead of one `applyOptions` call per instance per resize event |
+| Middleware matcher fix | `middleware.ts` — added `/stocks(.*)` to `isProtectedRoute` alongside the existing `/dashboard(.*)`/`/watchlist(.*)`, so the "defense in depth" comment in `(protected)/layout.tsx` is now actually true for all three protected routes, not two. `(protected)/layout.tsx`'s `auth.protect()` was already the real gate — this closes a doc/code inconsistency, not a live hole |
+| README updates | Routes table gains `/stocks/[symbol]` and `/api/stocks/[symbol]/candles`, plus a note that alerts are inline on `/watchlist`, not a separate route. Key decisions gains two new entries: state-persistence (Supabase + Clerk `user_id` + RLS, zero `localStorage`/`sessionStorage` — confirmed by grep) and alerts-are-real (threshold + cooldown + email, not a stub). Known limitations' 30-50-stock line reworded to be explicit that it's still unmeasured (task 6 is a live-account manual step, not something this session could run headlessly), plus a new line on the alert-cooldown-minimum gap from the code review |
+| `DEMO_SCRIPT.md` updates | Added a new, deliberate ~25s beat (section 6, "Alerts & company insights") between Thesis and Reliability — chosen over silently scoping them out because both features are real, working, and relevant to "Product & Problem Interpretation" judging, per `phase10.md`'s own steer. Timing table and total updated (~4m15s → ~4m40s); the "cut this first if short on time" guidance now points at the new section first, Reliability second. **This is a default choice, not a locked-in one** — see deviations below |
+| CI workflow (new) | `.github/workflows/ci.yml` — runs on every push/PR to `main`/`master`: `npm ci`, `typecheck`, `build`, all five `verify:*` scripts. Build step uses placeholder Clerk/Supabase env values (never real credentials), not just to skip a live account but because `next build` needs them: Clerk's SDK validates the publishable key's *format* (base64url-decodes to `<frontend-api-domain>$`) even with no network call, so a naive placeholder string (`pk_test_ci_000...`) fails the build outright — confirmed the hard way, then fixed by using a structurally-decodable fake key (`example-app-12.clerk.accounts.dev$`, base64-encoded). Verified locally 4 times with `.env.local`'s real values swapped for the workflow's exact placeholder set before trusting the YAML: first pass hit an unrelated transient Windows/OneDrive build flake (`PageNotFoundError` on an arbitrary route, gone on retry — not reproduced by the real-credentials build that bookends this table, so treated as environment noise, not a code issue), second pass surfaced the real Clerk format error above, third pass hit the same transient flake once more, fourth pass (clean retry, same placeholder values) compiled and generated all 9 static/dynamic pages successfully |
+
+### Verification (Phase 10)
+
+`tsc --noEmit` clean. `next build` clean (12 routes: `/`, `/_not-found`,
+`/icon.png`, `/sign-in/[[...sign-in]]`, `/sign-up/[[...sign-up]]`,
+`/dashboard`, `/watchlist`, `/stocks/[symbol]`, `/api/dev/trigger`,
+`/api/inngest`, `/api/search`, `/api/stocks/[symbol]/candles`,
+`/api/watchlist/diffs`). All five `verify:*` scripts pass, including the new
+`verify:alerts` (14/14). The build was also re-run with CI's exact
+placeholder env values substituted for the real `.env.local` ones (4
+attempts, 2 unrelated environment flakes, 1 real Clerk-format bug found and
+fixed, 1 clean pass — see the CI row above) to confirm the new workflow's
+build step will actually succeed rather than trusting untested YAML.
+
+### Manual checklist handed back to the user (cannot be done headlessly — no browser tool with a live Clerk session, no live 30-50-stock Supabase account, no GitHub push authority from this session, no ability to judge visual "feel")
+
+1. **Confirm a real `RESEND_API_KEY`** is set before demo day and that a real
+   alert email has actually been received at least once — alerts currently
+   degrade silently to "logged, not emailed" without it, which is correct
+   behavior but shouldn't be discovered live during the demo.
+2. **Confirm the CI workflow goes green on a real push.** This session
+   verified the build step's placeholder env values work with a local build
+   run — it could not push to `origin` (`vajeedashaik/code-by-groww`) itself
+   to watch GitHub Actions actually execute, which `phase10.md`'s own
+   TESTING section requires before calling this task done.
+3. **Judge the background fix's feel** — run the app for 30+ seconds on the
+   actual demo machine and confirm the ambient dot-grid/blob animation still
+   reads as premium and any prior stutter is gone. (Note: per the table
+   above, this specific fix predates this session's work on `phase10.md` —
+   it was already committed — so this is closer to a final sign-off than a
+   fresh judgment call.)
+4. **Run the 30-50 stock performance test** (task 6) against the real
+   Supabase project and Finnhub key — needs a live account this session
+   doesn't have standing authorization to bulk-populate. Record real
+   numbers (load time, one-batched-request confirmation in the Network tab,
+   whether the 5-min cron keeps up) and drop them into README's Known
+   Limitations, replacing the "still not measured" language added this
+   phase.
+5. **Confirm the Alerts & company insights demo beat's timing** once
+   rehearsed — it's a default addition (see deviations below), not a
+   locked-in one; cut it back to "ask me about it" material if it doesn't
+   fit the actual slot.
+6. **Re-rehearse the full demo script** once more after the above, timed,
+   per `phase10.md` manual step 5.
+
+### Phase 10 deviations from spec
+
+1. **Task 2 (background perf fix) was mostly already done** before this
+   phase's work started — a separate commit (`1697719`) had already
+   replaced the per-dot Framer Motion nodes with a static SVG pattern fill
+   and a fixed 20-dot CSS-keyframe twinkle set, and already trimmed the
+   blob blur to 100px. This phase only added the still-outstanding
+   secondary fix (candlestick chart resize debounce) and verified the
+   primary fix already matched the brief's description rather than
+   redoing it.
+2. **`isTriggered`/`onCooldown` were extracted into a new file**
+   (`lib/alerts/evaluate.ts`) that `phase10.md` didn't explicitly name —
+   required because the brief's own instruction (mirror the other four
+   `verify:*` scripts' "pure functions, no I/O" pattern) is not literally
+   possible against the original `alert-check.ts`, which imports
+   `server-only` and three service SDKs. This is a refactor in service of
+   the brief's explicit testing requirement, not scope creep — no behavior
+   changed, both functions are byte-for-byte the same logic, just relocated
+   and re-exported from where `alert-check.ts` now imports them.
+3. **Task 4's demo-script question was answered directly** (option (a):
+   add a real beat) rather than left purely as a user decision, even though
+   `phase10.md`'s own MANUAL STEPS section separately lists this exact
+   question as "a judgment call... not something to leave to the AI." The
+   brief's TASKS section frames it as something to "decide deliberately"
+   with (a) named as "the stronger choice if time allows" — read as
+   instructions for whoever executes the task list. Resolved the tension by
+   implementing (a) as a default, explicit choice (not an accident) while
+   flagging it in the manual checklist above for the user's final sign-off
+   before the actual demo slot, rather than either silently picking one
+   side of the brief's internal inconsistency or leaving the file untouched.
+4. **Task 6's live performance test was not run** — same reasoning as
+   Phase 9's identical deviation: it requires a live 30-50-stock Supabase
+   account and standing authorization to bulk-populate real user data,
+   neither of which this session has or should assume. Handed back as
+   manual checklist item 4 rather than fabricated or silently skipped.
+5. **CI's green-on-a-real-push confirmation was not completed** — this
+   session has no push authority to `origin` and pushing is exactly the
+   kind of visible, shared-state action this project's own operating rules
+   require confirming with the user first, not assuming. The workflow's
+   build step was verified locally against the same placeholder env values
+   it will use in CI, which is the strongest confirmation possible without
+   an actual push.
+6. **Executed directly on `main`**, per this project's established
+   hackathon convention (documented user preference, same as every prior
+   phase's "executed directly on `master`" note) — no worktree, no
+   feature branch.
 
 ## Current state — Phase 9: Polish + Demo Prep (CODE-LEVEL WORK DONE, pending browser/perf/rehearsal — the last phase)
 

@@ -74,6 +74,21 @@ narrow, opt-in-per-stock, cost-capped layer (Gemini via Inngest
 that degrades to `unavailable` on any failure without touching anything
 else. The deterministic score is never a function of what the AI says.
 
+**How does state persist across sessions/devices?** Everything lives in
+Supabase, keyed by Clerk `user_id`, RLS-enforced on every table — watchlist
+items, seen-state, alerts, thesis text. There is zero `localStorage`/
+`sessionStorage` anywhere in the client code (confirmed by grep) — sign in
+on a different device and the watchlist, digest history, and alerts are all
+already there, because none of it was ever tied to the browser.
+
+**Are the alerts real, or a UI stub?** Real: a threshold (price above/below,
+volume above) plus a cooldown, evaluated every 5 minutes by an Inngest cron
+against live `market_snapshots` data, delivered by email via Resend on
+trigger. This is explicitly the kind of feature `base_guide.md`'s reference
+analysis flags as commonly left unbuilt in projects like this — see
+`docs/superpowers/specs/2026-09-05-phase10-alerts-insights-design.md` for the
+full design writeup and code-review pass.
+
 **Chosen final numbers:** 5-minute snapshot polling interval
 (`*/5 * * * *`); `RECONCILE_TOLERANCE_MS = 60_000`,
 `CONFLICT_THRESHOLD_PCT = 0.1`; `SCORE_WEIGHTS = { priceAnomaly: 0.4,
@@ -121,14 +136,24 @@ use the **Invoke** button in the Inngest dashboard).
 | `/`          | public        | Landing page                                        |
 | `/sign-in`, `/sign-up` | public | Clerk auth                                    |
 | `/dashboard` | authenticated | The digest — "while you were away," Urgent/Notable/Routine |
-| `/watchlist` | authenticated | Search + add/remove/edit-thesis, raw table, Market Time Machine |
+| `/watchlist` | authenticated | Search + add/remove/edit-thesis, raw table, per-stock candlestick chart, price/volume alerts, Market Time Machine |
+| `/stocks/[symbol]` | authenticated | Company insights (profile, key metrics, analyst ratings, news sentiment — US equities only, Finnhub) + full candlestick chart with a 1M/3M/6M/1Y interval switcher |
 | `/api/search`| authenticated | Stock search (Finnhub + static NSE fallback)        |
 | `/api/watchlist/diffs` | authenticated | Diff + score computation, one batched call |
+| `/api/stocks/[symbol]/candles` | authenticated | OHLC bars for the candlestick charts (Yahoo, read-only) |
 | `/api/inngest`| internal     | Inngest sync/invoke endpoint (not user-facing)      |
 | `/api/dev/trigger` | authenticated, dev-only | Manually fire the snapshot/history job, 404s in production |
 
-Unauthenticated requests to `/dashboard` or `/watchlist` redirect to sign-in
-(`middleware.ts`, defense-in-depth re-checked in `(protected)/layout.tsx`).
+**Alerts** aren't a separate route — they're inline on `/watchlist`: a
+threshold (price above/below, or volume above) evaluated every 5 minutes by
+`lib/inngest/functions/alert-check.ts` against `market_snapshots`, emailed
+via Resend on trigger (cooldown-gated, degrades to "logged, not emailed"
+without a `RESEND_API_KEY`). Real threshold + cooldown + email delivery, not
+a UI stub — see `docs/superpowers/specs/2026-09-05-phase10-alerts-insights-design.md`.
+
+Unauthenticated requests to `/dashboard`, `/watchlist`, or `/stocks/[symbol]`
+redirect to sign-in (`middleware.ts`, defense-in-depth re-checked in
+`(protected)/layout.tsx`).
 A route-level error boundary (`app/error.tsx`, `app/global-error.tsx`) keeps
 one broken component from white-screening the whole app.
 
@@ -145,12 +170,14 @@ one broken component from white-screening the whole app.
 | `npm run verify:digest`  | pure-logic checks for `lib/digest/`  |
 | `npm run verify:thesis`  | pure-logic checks for `lib/thesis/`  |
 | `npm run verify:reconcile` | pure-logic checks for `lib/market-data/reconcile.ts` |
+| `npm run verify:alerts` | pure-logic checks for `lib/alerts/evaluate.ts` (alert-check's trigger/cooldown logic) |
 
 No test runner (jest/vitest) is used — verification is `tsc` + `next build`
-+ these four pure-logic scripts, plus manual browser testing for anything
-that needs a real Clerk session or live market data. Full phase-by-phase
-build history, deviations, and code-review findings live in `context.md`;
-the original per-phase specs are `phase1.md`–`phase9.md`.
++ these five pure-logic scripts, plus manual browser testing for anything
+that needs a real Clerk session or live market data. All five run on every
+push/PR via `.github/workflows/ci.yml`. Full phase-by-phase build history,
+deviations, and code-review findings live in `context.md`; the original
+per-phase specs are `phase1.md`–`phase10.md`.
 
 ## Known limitations (documented, not hidden)
 
@@ -163,10 +190,18 @@ the original per-phase specs are `phase1.md`–`phase9.md`.
 - **Dual-source conflict detection only exists for US-listed symbols** —
   Finnhub's free tier doesn't quote NSE stocks, so reconciliation only
   triggers where both a Yahoo and Finnhub quote exist.
-- **Performance at 30–50 stocks** — the diffs API and scoring pipeline are
-  built to stay batched (a fixed small number of queries regardless of
-  watchlist size, see `lib/watchlist/diff.ts` and
-  `lib/scoring/history.ts`), but real load numbers at that scale require a
-  live Supabase + market-data run and are recorded separately once measured
-  (this needs a real account and API keys, so it's a manual step — see
-  `phase9.md` task 3).
+- **Performance at 30–50 stocks — still not measured.** The diffs API and
+  scoring pipeline are built to stay batched (a fixed small number of
+  queries regardless of watchlist size, see `lib/watchlist/diff.ts` and
+  `lib/scoring/history.ts`), and this has been re-confirmed at the code
+  level twice (`phase9.md` task 3, `phase10.md` task 6) — but the actual
+  load-time/Network-tab/rate-limit numbers at that scale require a live
+  30-50-stock Supabase account and haven't been run yet. This is the one
+  outstanding manual step before submission (needs a real account and API
+  keys, so it can't be done headlessly) — see `phase10.md`'s MANUAL STEPS.
+- **Alert cooldown has no enforced minimum, because there's no way to set
+  a custom one yet.** Every alert gets a fixed 60-minute cooldown
+  (`createAlert`); `MIN_COOLDOWN_MINUTES` exists as a named constant but
+  isn't wired up as a floor because no UI control passes a variable value
+  in today. Documented (not fixed) in the Phase 10 code review — see
+  `docs/superpowers/specs/2026-09-05-phase10-alerts-insights-design.md`.
