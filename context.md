@@ -52,6 +52,14 @@ what was actually last *shown*, or accept this as bounded staleness) can
 revisit; Phase 4's job was correctness of the stored state, not eliminating
 every possible display race.
 
+One narrower, undocumented-until-now edge case (flagged in code review):
+two near-simultaneous `markWatchlistSeen()` calls (double-mount effect, two
+tabs open) each independently re-query "latest now" and then upsert — if the
+call that read the *older* snapshot happens to finish its upsert *after* the
+call that read the newer one, the final row regresses to the older snapshot
+even though the newer one was already marked seen. Low-impact for a
+single-tab hackathon UI; not fixed in Phase 4, noted for awareness.
+
 ### Removed-item seen-state decision (Task 8 of phase4.md)
 
 **Chosen: leave orphaned `user_seen_state` rows in place, ignore them.**
