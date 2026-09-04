@@ -46,8 +46,9 @@ export class MarketDataError extends Error {
     symbol: string,
     source: string,
     message?: string,
+    options?: { cause?: unknown },
   ) {
-    super(message ?? `${source}: ${code} for ${symbol}`);
+    super(message ?? `${source}: ${code} for ${symbol}`, options);
     this.name = "MarketDataError";
     this.code = code;
     this.symbol = symbol;
