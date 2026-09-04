@@ -4,9 +4,18 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { markWatchlistSeen } from "@/app/(protected)/watchlist/actions";
 import { formatElapsed } from "@/lib/watchlist/format-elapsed";
 import type { SymbolDiff } from "@/lib/watchlist/diff";
+import type { Bucket, Confidence, Explanation } from "@/lib/scoring/score";
+
+/** SymbolDiff plus the Phase 5 fields the diffs API merges in for non-first-view symbols. */
+type ScoredDiff = SymbolDiff & {
+  score?: number;
+  bucket?: Bucket;
+  confidence?: Confidence;
+  explanation?: Explanation;
+};
 
 interface DiffsState {
-  diffs: Map<string, SymbolDiff> | null;
+  diffs: Map<string, ScoredDiff> | null;
   loading: boolean;
 }
 
@@ -34,7 +43,7 @@ export function WatchlistDiffsProvider({
       try {
         const res = await fetch("/api/watchlist/diffs");
         if (!res.ok) throw new Error(`status ${res.status}`);
-        const body: { diffs: SymbolDiff[] } = await res.json();
+        const body: { diffs: ScoredDiff[] } = await res.json();
         if (cancelled) return;
         setState({
           diffs: new Map(body.diffs.map((d) => [d.symbol, d])),
@@ -56,7 +65,13 @@ export function WatchlistDiffsProvider({
   );
 }
 
-/** Renders one symbol's raw diff line. Reads from the shared fetch above. */
+const BUCKET_COLOR: Record<Bucket, string> = {
+  Urgent: "text-red-600",
+  Notable: "text-amber-600",
+  Routine: "text-gray-500",
+};
+
+/** Renders one symbol's raw diff line plus its Phase 5 score/bucket, as plain text. */
 export function DiffLine({ symbol }: { symbol: string }) {
   const { diffs, loading } = useContext(DiffsContext);
 
@@ -89,8 +104,15 @@ export function DiffLine({ symbol }: { symbol: string }) {
     diff.timeElapsedMs !== null ? formatElapsed(diff.timeElapsedMs) : "";
 
   return (
-    <span className={`text-xs ${pctColor}`}>
-      {pctLabel} since you last checked{elapsed ? `, ${elapsed}` : ""}
+    <span className="text-xs">
+      <span className={pctColor}>
+        {pctLabel} since you last checked{elapsed ? `, ${elapsed}` : ""}
+      </span>
+      {diff.bucket && (
+        <span className={`ml-2 ${BUCKET_COLOR[diff.bucket]}`}>
+          [{diff.bucket}, score {diff.score?.toFixed(2)}, {diff.confidence} confidence]
+        </span>
+      )}
     </span>
   );
 }
