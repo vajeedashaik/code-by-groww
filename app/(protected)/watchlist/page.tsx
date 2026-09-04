@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import AddStock from "@/components/watchlist/add-stock";
 import RemoveStockButton from "@/components/watchlist/remove-stock-button";
@@ -100,6 +101,11 @@ export default async function WatchlistPage() {
         <p className="text-sm text-gray-600">
           Search a stock, add it with an optional thesis, and it stays here —
           synced to your account.
+        </p>
+        <p className="mt-2 text-sm">
+          <Link href="/dashboard" className="text-gray-600 underline hover:text-gray-900">
+            Back to digest
+          </Link>
         </p>
       </div>
 
