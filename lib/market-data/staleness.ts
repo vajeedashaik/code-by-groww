@@ -12,9 +12,8 @@
  * the ingest job also writes a best-effort `status` onto rows so the column is
  * populated, but callers that need a correct value should recompute here.
  *
- * This file is the CANONICAL home of `MarketSnapshotStatus`. Task 7 makes
- * `types/database.ts` re-export it (rather than re-declare) so the DB-column
- * contract and this grader can never drift apart.
+ * This file holds the canonical (only) definition of `MarketSnapshotStatus`.
+ * Any consumer that needs the DB `status`-column contract imports it from here.
  */
 
 export type MarketSnapshotStatus = "FRESH" | "DELAYED" | "STALE";
