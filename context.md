@@ -72,9 +72,44 @@ dead reference rows are an accepted, harmless gap, not corruption. A future
 retention/cleanup job (if ever needed) can be added without touching this
 phase's logic.
 
+### Code review (Phase 4)
+
+Dispatched a `superpowers:code-reviewer` subagent against the diff
+(`d3c02f9`→`eaf4ca8`) before declaring Phase 4 done, checking it against
+phase4.md's 6 core acceptance criteria plus general code quality.
+
+**Result:** race-condition policy and N+1-avoidance both verified as
+correctly implemented (not just documented as correct) — the reviewer
+independently confirmed no code path passes a client-supplied snapshot id
+into a write, and `computeDiffsForUser` issues exactly 3 queries regardless
+of watchlist size. UI sequencing (diff shown before mark-as-seen fires) was
+independently traced through `WatchlistDiffsProvider`'s effect and confirmed
+correct. Removed-item leak prevention confirmed.
+
+One **Important** finding, fixed immediately (commit `78ff2d9`): 4 Supabase
+query error results were silently discarded across `markWatchlistSeen()`
+and `computeDiffsForUser()` — `{ data } = await supabase...` with no `error`
+check, inconsistent with this file's own `addWatchlistItem`/
+`removeWatchlistItem` precedent and with `page.tsx`'s `console.error`
+convention. A genuine query failure would have been mislabelled as success
+(`markWatchlistSeen`) or as first-view for every symbol
+(`computeDiffsForUser`) — the latter is worse than silent, since it produces
+a confidently wrong result rather than an obviously broken one. Fixed by
+checking and logging (`console.error`) all 4, and returning `{ ok: false }`
+from `markWatchlistSeen` on a genuine query failure instead of falling
+through.
+
+One **Minor** finding, documented not fixed (see the race-condition section
+above): a narrower overlapping-upsert case between two near-simultaneous
+`markWatchlistSeen()` calls. Two other Minor notes (market_snapshots queried
+twice per page load — once server-side for price, once client-side for
+diffs; the inherited `.limit(symbols.length * 10)` truncation assumption
+from Phase 3) were judged out of scope for this phase.
+
 ### Phase 4 verification
 
-- `npx tsc --noEmit` — exit 0, no output.
+- `npx tsc --noEmit` — exit 0, no output (re-run clean after the code-review
+  fix commit too).
 - `npx next build` — compiled successfully, 11 routes + middleware, 0
   errors. `/api/watchlist/diffs` listed as a dynamic (ƒ) route.
 - **Browser/manual tests — not yet run** (need a real Clerk session +
@@ -109,6 +144,11 @@ phase's logic.
    pure Server Component render can't express.
 3. **No test runner** — same Phase 2 deviation still applies; verification
    is `tsc`/`build`/manual browser tests, not automated unit tests.
+4. **Supabase query errors added after initial implementation, not in the
+   original plan** — code review caught 4 silently-discarded `error` results
+   in `markWatchlistSeen`/`computeDiffsForUser`; fixed post-review in commit
+   `78ff2d9` to log and (for `markWatchlistSeen`) fail loudly instead of
+   falling through to a misleading success/first-view result.
 
 ## Current state — Phase 3: Market Data Pipeline (COMPLETE, pending browser verification)
 
@@ -438,7 +478,7 @@ provider in Supabase and paste the Clerk domain. See README steps 3–4.
 ## Git
 
 All work so far is on `master` (no feature branches, no remote configured).
-16 commits from Phase 1 through Phase 3, oldest first:
+25 commits from Phase 1 through Phase 4, oldest first:
 
 - `3d41835` docs: Phase 1 foundation design spec
 - `4f8ea2b` feat: Phase 1 foundation scaffold
@@ -460,7 +500,13 @@ All work so far is on `master` (no feature branches, no remote configured).
 - `0c91ac6` feat: PriceCell — price + % change with fetching-price fallback
 - `d3e796a` feat: show live snapshot price + % change on the watchlist page
 - `62e784f` docs: Phase 3 run instructions, acceptance tests, context update
-- `d3c02f9` chore: add server-only guard to both inngest job files (HEAD)
+- `d3c02f9` chore: add server-only guard to both inngest job files
+- `4e4c33f` docs: context.md — final Phase 3 review notes + full commit log
+- `a074f04` docs: Phase 4 implementation plan + phase4 brief
+- `cf1751b` feat: Phase 4 seen-state tracking + raw diff computation
+- `eaf4ca8` docs: Phase 4 context update — what's built, race policy, manual tests outstanding
+- `78ff2d9` fix: log/surface Supabase query errors in markWatchlistSeen + computeDiffsForUser
+- `fe0ee02` docs: note overlapping-write edge case from code review (HEAD)
 
 (Phase 3 design/plan docs were written and committed before Phase 2's own
 code was committed — the design/plan work happened first in the session,
@@ -468,9 +514,10 @@ Phase 2 code landed right after. Order above is chronological by commit,
 not by phase number.)
 
 `node_modules/`, `.next/`, `.env*.local` are gitignored. `phase2.md` was
-committed with the scaffold by accident — harmless. `phase3.md` (this
-phase's informal brief) and `phase4.md` (next phase's brief, dropped in by
-the user, not yet reviewed) currently sit **untracked** in the working tree.
+committed with the scaffold by accident — harmless. `phase3.md` and
+`phase4.md` are tracked (committed alongside their phases' work).
+`phase5.md` (next phase's brief, dropped in by the user, not yet reviewed)
+currently sits **untracked** in the working tree.
 
 ## How to continue
 
