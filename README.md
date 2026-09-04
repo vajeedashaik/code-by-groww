@@ -62,8 +62,11 @@ cp .env.example .env.local
 
 Fill every value in `.env.local` from steps 1–2, plus a free
 [Finnhub](https://finnhub.io) API key as `FINNHUB_API_KEY` (Phase 2 stock
-search; search falls back to a static NSE list if it's missing). `.env.local`
-is gitignored — never commit real keys.
+search, also used for Phase 7's company-news lookup; search falls back to a
+static NSE list if it's missing) and a free
+[Gemini](https://aistudio.google.com/apikey) API key as `GEMINI_API_KEY`
+(Phase 7 — the one AI call in this product). `.env.local` is gitignored —
+never commit real keys.
 
 ### 6. Run
 
@@ -123,6 +126,9 @@ supabase/migrations/      versioned SQL — run in the dashboard
 | `npm run start`     | serve the production build        |
 | `npm run typecheck` | `tsc --noEmit`                    |
 | `npm run inngest`   | Inngest dev server (run alongside `npm run dev`) |
+| `npm run verify:scoring` | pure-logic checks for `lib/scoring/` (Phase 5) |
+| `npm run verify:digest`  | pure-logic checks for `lib/digest/` (Phase 6)  |
+| `npm run verify:thesis`  | pure-logic checks for `lib/thesis/` (Phase 7)  |
 
 ## Phase 3: market data
 
@@ -162,6 +168,34 @@ index beyond its primary key, and neither has a retention/pruning job — both
 grow without bound as the cron jobs run. The `/watchlist` page bounds its own
 read with `.limit()` as a stopgap; a proper fix (a `DISTINCT ON` view/RPC, or
 dedicated indexes plus pruning) is deferred past this hackathon phase.
+
+## Phase 7: AI thesis relevance
+
+For any stock that is both flagged (Urgent/Notable, Phase 5) and has a
+user-provided thesis, a Gemini call (via Inngest `step.ai.infer`, structured
+JSON output) judges whether recent Finnhub news supports, contradicts, or
+doesn't clearly affect that thesis — the one AI touchpoint in this product,
+kept fully separate from the deterministic score (it never feeds back into
+`meaningfulness_score`/`bucket`).
+
+- Triggered from `GET /api/watchlist/diffs` right after Phase 5 scoring, for
+  at most 5 highest-scoring eligible stocks per call (`lib/thesis/trigger.ts`)
+  — a cost/latency trade-off, not a hidden limit.
+- Each Inngest event carries an idempotent id
+  (`${userId}:${symbol}:${changeEventId}`), so the client's 5-second poll for
+  a pending verdict (`components/watchlist/diff-panel.tsx`) never triggers a
+  duplicate model call.
+- No news found → the model still runs and returns `no_new_information`
+  plainly, rather than the code fabricating a verdict. A broken/missing
+  `GEMINI_API_KEY` degrades to `unavailable` — the rest of the digest is
+  unaffected.
+- Edit an existing thesis from `/watchlist` ("Edit thesis") — past
+  `change_events` verdicts stay historically accurate; only future checks see
+  the new text.
+
+Verification: `npm run verify:thesis` (pure-logic checks — verdict parsing,
+cap/priority selection). Full acceptance criteria and manual testing steps:
+`phase7.md`.
 
 ## Phase 3 acceptance tests
 
