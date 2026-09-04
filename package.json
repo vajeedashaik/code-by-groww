@@ -9,7 +9,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "inngest": "inngest-cli dev",
-    "verify:scoring": "tsx scripts/verify-scoring.ts"
+    "verify:scoring": "tsx scripts/verify-scoring.ts",
+    "verify:digest": "tsx scripts/verify-digest.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.6",
