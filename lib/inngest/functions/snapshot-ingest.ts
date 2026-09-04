@@ -1,3 +1,4 @@
+import "server-only";
 import { inngest } from "@/lib/inngest/client";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getAllQuotes, MarketDataError } from "@/lib/market-data";
