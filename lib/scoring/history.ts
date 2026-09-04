@@ -22,12 +22,23 @@ export async function loadRecentHistory(
   const result = new Map<string, HistoryBar[]>();
   if (symbols.length === 0) return result;
 
+  // Global ORDER BY date DESC + a shared LIMIT means the cutoff can fall
+  // mid-date-group across symbols with uneven coverage, in principle
+  // starving one symbol's rows in favor of another's (no per-symbol
+  // partition is available without an RPC/view). A generous 3x safety
+  // margin plus a deterministic secondary sort key make this negligible in
+  // practice for this project's data volume (bounded by the Phase 3
+  // backfill's fixed ~60-day window per symbol) without the added
+  // complexity of a partitioned query — an accepted trade-off, not a full
+  // fix. If this ever needs to be exact, replace with a
+  // `row_number() over (partition by symbol order by date desc)` RPC.
   const { data, error } = await supabase
     .from("daily_history")
     .select("symbol, date, close, volume")
     .in("symbol", symbols)
     .order("date", { ascending: false })
-    .limit(symbols.length * perSymbolLimit);
+    .order("symbol", { ascending: true })
+    .limit(symbols.length * perSymbolLimit * 3);
 
   if (error) {
     console.error(`[loadRecentHistory] daily_history query failed: ${error.message}`);
