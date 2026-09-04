@@ -12,8 +12,12 @@ export type Confidence = "Low" | "Medium" | "High";
 export type DataCompleteness =
   | "full"
   | "no_sector"
+  | "no_volume"
+  | "no_sector_no_volume"
   | "no_volatility"
-  | "no_volatility_no_sector";
+  | "no_volatility_no_sector"
+  | "no_volatility_no_volume"
+  | "no_volatility_no_sector_no_volume";
 
 export interface Explanation {
   price_change_pct: number;
@@ -72,6 +76,19 @@ export function computeMeaningfulness(
     sectorName,
   } = input;
 
+  if (!Number.isFinite(priceDeltaPct)) {
+    throw new Error(`computeMeaningfulness: priceDeltaPct must be finite, got ${priceDeltaPct}`);
+  }
+  if (dailyVolPct !== null && !Number.isFinite(dailyVolPct)) {
+    throw new Error(`computeMeaningfulness: dailyVolPct must be finite or null, got ${dailyVolPct}`);
+  }
+  if (marketDeltaPct !== null && !Number.isFinite(marketDeltaPct)) {
+    throw new Error(`computeMeaningfulness: marketDeltaPct must be finite or null, got ${marketDeltaPct}`);
+  }
+  if (sectorDeltaPct !== null && !Number.isFinite(sectorDeltaPct)) {
+    throw new Error(`computeMeaningfulness: sectorDeltaPct must be finite or null, got ${sectorDeltaPct}`);
+  }
+
   const volatilityAvailable = dailyVolPct !== null && dailyVolPct > 0;
 
   // Fallback (task 3): no volatility -> use raw % change directly, never divide by zero.
@@ -120,13 +137,17 @@ export function computeMeaningfulness(
       ? "High"
       : "Medium";
 
-  const dataCompleteness: DataCompleteness = !volatilityAvailable
-    ? hasSector
-      ? "no_volatility"
-      : "no_volatility_no_sector"
-    : hasSector
-      ? "full"
-      : "no_sector";
+  // Derived from the same three factors as `confidence` so the two can never
+  // disagree (a prior version computed data_completeness from only
+  // volatility+sector, which could read "full" next to a "Medium" confidence
+  // when only volume was missing).
+  const missing: string[] = [];
+  if (!volatilityAvailable) missing.push("volatility");
+  if (!hasSector) missing.push("sector");
+  if (!hasVolume) missing.push("volume");
+  const dataCompleteness = (
+    missing.length === 0 ? "full" : `no_${missing.join("_no_")}`
+  ) as DataCompleteness;
 
   return {
     score,
