@@ -10,6 +10,157 @@ Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
 
 **Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4–9 (seen-state/diffing, scoring, digest, thesis, …).
 
+## Current state — Phase 5: Meaningfulness Engine (BUILT, pending browser/manual verification)
+
+Converts Phase 4's raw price/volume diff into a volatility-normalized,
+market/sector-relative meaningfulness score (Urgent/Notable/Routine bucket +
+Low/Medium/High confidence + structured explanation), persisted to
+`change_events` and exposed through the existing diffs API. Built via
+`superpowers:subagent-driven-development` — fresh implementer subagent per
+task, spec-compliance review, then code-quality review, for all 12 tasks in
+`docs/superpowers/plans/2026-09-04-phase5-meaningfulness-engine.md` (full
+design rationale in `docs/superpowers/specs/2026-09-04-phase5-meaningfulness-engine-design.md`).
+
+### What is built (Phase 5)
+
+| Area | Files |
+| --- | --- |
+| Sector reference data | `lib/market-data/sectors.ts` — static symbol→sector map (6 sectors × 5 NSE large-caps), `^NSEI` Nifty benchmark, `lookupSector`/`symbolsInSector` helpers |
+| Reference-symbol wiring | `lib/inngest/functions/shared.ts`'s `loadWatchlistSymbols()` unions the user-watchlisted symbols with the fixed reference set, so the existing Phase 3 Inngest jobs fetch/store Nifty + sector stocks with zero changes to the job files themselves |
+| Pure math | `lib/scoring/volatility.ts` (`computeVolatilityPct` — 20-day std dev of daily returns, null below threshold; `computeAverageVolume`), `lib/scoring/benchmarks.ts` (`computeDailyMovePct`, `computeSectorBenchmarkPct` — latest-vs-prior-close) |
+| Scoring | `lib/scoring/score.ts` — `computeMeaningfulness()`: shared-denominator z-scores (`priceZScore`/`marketRelativeZScore`/`sectorRelativeZScore` all divide by the stock's own `dailyVolPct`), named `SCORE_WEIGHTS`/`BUCKET_THRESHOLDS` constants, `Bucket`/`Confidence`/`DataCompleteness`/`Explanation` types. Throws on non-finite numeric input (added during review — a silent NaN would otherwise misclassify as "Routine", the worst failure mode for a signal-surfacing engine) |
+| Batched history loader | `lib/scoring/history.ts` — `loadRecentHistory()`: one bounded query across all needed symbols (scored + market benchmark + sector members), grouped/capped/reversed in JS — same accepted pattern as Phase 3/4's `.limit(symbols.length * N)` queries. 3x safety-margin + deterministic secondary sort added during review (see Known limitation below) |
+| Orchestration | `lib/scoring/compute-for-diffs.ts` — `computeAndPersistScores()`: batches history loading once, memoizes sector benchmarks per unique sector (not per diff), scores every non-first-view diff, upserts `change_events` on `(user_id, symbol, snapshot_id)`. Per-diff work wrapped in try/catch (added during review) so one bad symbol never aborts the whole batch — mirrors the Inngest jobs' "log and skip, never fatal" contract |
+| Migration | `supabase/migrations/0004_change_events_snapshot_dedup.sql` — adds `snapshot_id uuid references market_snapshots(id)` (idempotent `add column if not exists`) + `unique(user_id, symbol, snapshot_id)`; `types/database.ts` and `supabase/schema.sql` updated to match |
+| Wiring | `lib/watchlist/diff.ts`'s `SymbolDiff` gained `currentSnapshotId` (sourced from the already-fetched `current` snapshot, no new query); `app/api/watchlist/diffs/route.ts` calls `computeAndPersistScores` and merges `{score, bucket, confidence, explanation}` into non-first-view diffs; `components/watchlist/diff-panel.tsx`'s `DiffLine` renders `[Bucket, score X.XX, Confidence confidence]` as plain colored text — no digest UI polish (that's Phase 6) |
+| Verification script | `scripts/verify-scoring.ts` (run via `npm run verify:scoring`, needs new `tsx` devDependency) — exercises phase5.md's acceptance tests 1-4 against the pure functions: scenario (a)/(b) relative ranking, <20-day fallback, unmapped-sector fallback, zero-volume handling. All 13 checks pass |
+
+### Weights and thresholds chosen (initial, per phase5.md's own "don't over-tune" instruction)
+
+`SCORE_WEIGHTS = { priceAnomaly: 0.4, volumeAnomaly: 0.2, marketRelative: 0.2, sectorRelative: 0.2 }`.
+`BUCKET_THRESHOLDS = { urgent: 2.0, notable: 0.8 }`. Verified against phase5.md's
+own worked scenarios: a choppy stock (5%/day normal volatility) riding a
+broad +5% rally with a +7% move scores 0.68/Routine; a calm stock (1%/day
+normal volatility) with a flat market and a 4x volume surge on a +3% move
+scores 2.94/Urgent — confirming the core insight (shared-volatility-
+denominator z-scores) correctly ranks "genuinely independent move" above
+"large move that's mostly market noise," not just raw magnitude. Manual
+step 2/3 of phase5.md (re-tuning against real multi-day data) is still the
+user's job — these are the documented starting values, not a final
+calibration.
+
+### Known limitation: `loadRecentHistory`'s shared-LIMIT trade-off
+
+Flagged in code review: the batched history query uses one global
+`ORDER BY date DESC LIMIT symbols.length * perSymbolLimit * 3` rather than a
+true per-symbol partition (which would need an RPC/view). If symbols have
+very uneven date coverage, a symbol could in principle get starved below its
+full `perSymbolLimit` rows even though more exist in the table — pushing it
+from "20+ rows, volatility available" to "under 20, Low confidence" with no
+error logged. Mitigated (not eliminated) with a 3x safety margin and a
+deterministic secondary sort. Accepted as proportionate for this project's
+data volume (Phase 3's backfill keeps each symbol's history bounded); a true
+fix would need a `row_number() over (partition by symbol ...)` query.
+
+### `change_events` explanation shape (what Phase 6 will render)
+
+```json
+{
+  "price_change_pct": number,
+  "price_zscore": number,
+  "volume_ratio": number | null,
+  "market_change_pct": number | null,
+  "sector_change_pct": number | null,
+  "sector_used": string | null,
+  "data_completeness": "full" | "no_sector" | "no_volume" | "no_sector_no_volume" | "no_volatility" | "no_volatility_no_sector" | "no_volatility_no_volume" | "no_volatility_no_sector_no_volume"
+}
+```
+
+`data_completeness` was widened from the original design's 4 values to these
+8 during code review, so it's derived from the same three factors
+(volatility/sector/volume availability) as `confidence` and the two can
+never disagree (previously, missing-volume-only cases could read
+`"full"` next to a `"Medium"` confidence — a real inconsistency, fixed
+before anything downstream could depend on it).
+
+### Phase 5 code review findings (all fixed before moving on)
+
+Two-stage review (spec compliance, then code quality) per task, 12 tasks.
+Real, fixed issues:
+- Migration's `add column` wasn't idempotent (0003 precedent uses
+  `if not exists`) — fixed.
+- `computeMeaningfulness`'s `data_completeness` didn't account for missing
+  volume, disagreeing with `confidence` — fixed (shared derivation).
+- `computeMeaningfulness` had no guard against non-finite input, so a NaN
+  would silently produce `bucket: "Routine"` instead of surfacing a bug —
+  fixed (throws now).
+- `loadRecentHistory`'s shared global LIMIT could silently starve one
+  symbol's rows under uneven coverage — mitigated (see Known limitation
+  above).
+- `computeAndPersistScores` had no per-diff error isolation, so one bad
+  symbol would abort the whole batch (and, once wired into the live route,
+  the whole `/api/watchlist/diffs` response) — fixed (try/catch + log +
+  continue, matching the Inngest jobs' partial-failure contract).
+
+### Phase 5 verification
+
+- `npm run typecheck` (`tsc --noEmit`) — exit 0, no output.
+- `npm run build` (`next build`) — compiled successfully, 9 routes +
+  middleware, 0 errors. `/api/watchlist/diffs` still listed as dynamic (ƒ).
+- `npm run verify:scoring` (new `tsx`-based script, no jest/vitest in this
+  repo — same Phase 2-4 precedent) — all 13 checks pass, including the
+  scenario (a)/(b) relative-ranking test from phase5.md's acceptance
+  criteria 1-4.
+- **Browser/manual tests — not yet run.** phase5.md's acceptance tests 5-8
+  (inspecting real `change_events` rows in Supabase, confirming the diffs
+  API's live response shape, timing a 10+-stock watchlist, and sanity-
+  checking real scored examples against intuition) need a real Clerk
+  session + real multi-day market data and are the user's job, same as
+  every prior phase's browser tests.
+
+### Phase 5 manual steps outstanding (from phase5.md's "MANUAL STEPS")
+
+- [ ] Review/adjust the sector mapping in `lib/market-data/sectors.ts` to
+  match your actual demo watchlist's stocks.
+- [ ] Once real scores are flowing, manually sanity-check several real
+  examples across a few days of data against your own judgment; adjust
+  `SCORE_WEIGHTS`/`BUCKET_THRESHOLDS` (both in `lib/scoring/score.ts`) based
+  on what you observe, not just theory.
+- [ ] Decide final bucket thresholds after seeing real score distributions;
+  write down what you chose and why for the pitch's "why this algorithm"
+  answer.
+- [ ] Watch for a real news-driven move in your test watchlist during the
+  build window to use as a genuine demo example.
+
+### Phase 5 deviations from spec
+
+1. **`tsx` added as a devDependency** — not in the original plan; needed to
+   run `scripts/verify-scoring.ts` standalone (no jest/vitest in this repo).
+   Confirmed during implementation that `tsx` does NOT apply `tsconfig.json`
+   path aliases outside Next's bundler, so the verification script uses
+   relative imports (`../lib/scoring/score`) instead of `@/lib/scoring/score`.
+2. **`DataCompleteness` expanded from 4 to 8 values** (see explanation-shape
+   section above) — a code-review fix, not a plan deviation exactly, but a
+   change to the field's contract from what the original design doc
+   specified.
+3. **`computeMeaningfulness` throws on non-finite input** — not in the
+   original design; added during code review as a deliberate "fail loud,
+   don't silently misclassify" guard.
+4. **`explanation: result.explanation as unknown as Json` cast** in
+   `lib/scoring/compute-for-diffs.ts` — a hand-written TypeScript `interface`
+   isn't structurally assignable to the generated `Json` index-signature
+   type without a cast (verified as a real TS limitation, not a workaround
+   for a bug); the underlying data is genuinely JSON-safe.
+5. **`loadRecentHistory`'s query widened to a 3x safety margin + secondary
+   sort**, not the plan's original 1x margin — a code-review fix for the
+   shared-LIMIT starvation risk described above.
+6. **No test runner** — same Phase 2-4 deviation; verification is
+   `tsc`/`build`/`verify:scoring` script, not jest/vitest.
+7. **Executed directly on `master`**, same as every prior phase — user was
+   asked explicitly (per `subagent-driven-development`'s "never start on
+   master without consent" rule) and confirmed continuing the established
+   convention rather than using a worktree/branch.
+
 ## Current state — Phase 4: Seen-State & Diffing (BUILT, pending browser/manual verification)
 
 Tracks, per user per symbol, which `market_snapshots` row the user last saw,
@@ -516,13 +667,22 @@ not by phase number.)
 `node_modules/`, `.next/`, `.env*.local` are gitignored. `phase2.md` was
 committed with the scaffold by accident — harmless. `phase3.md` and
 `phase4.md` are tracked (committed alongside their phases' work).
-`phase5.md` (next phase's brief, dropped in by the user, not yet reviewed)
-currently sits **untracked** in the working tree.
+`phase5.md` and `phase6.md` (phase briefs dropped in by the user) currently
+sit **untracked** in the working tree. Phase 5's design/plan docs live in
+`docs/superpowers/specs/2026-09-04-phase5-meaningfulness-engine-design.md`
+and `docs/superpowers/plans/2026-09-04-phase5-meaningfulness-engine.md`.
+
+16 more commits landed for Phase 5 (migration + sectors + pure scoring math
++ orchestration + wiring + review-fix commits), oldest first, after
+`fe0ee02`: `a6c302e`, `4dc7cc6`, `8a8942d`, `9f9e8bb`, `89f2fba`, `86482ff`,
+`947f583`, `cfce083`, `fa4a356`, `b22ca37`, `1a2cf09`, `76d23a1`, `9085fe9`,
+`4a2e3a0`, `d144398`, `f20ada3` — see the Phase 5 section above for what
+each does; full messages via `git log --oneline fe0ee02..HEAD`.
 
 ## How to continue
 
 - Local run: fill `.env.local` (now incl. `FINNHUB_API_KEY`), run migrations
-  `0001`→`0003`, `npm install`, `npm run dev` + `npm run inngest`, open
+  `0001`→`0004`, `npm install`, `npm run dev` + `npm run inngest`, open
   `http://localhost:3000`.
 - Phase 3 built, compiling, and backend-smoke-tested (see the Phase 3 section
   above). Run the README "Phase 3 acceptance tests" in a browser — especially
@@ -531,4 +691,12 @@ currently sits **untracked** in the working tree.
   tracking + raw diffing, `GET /api/watchlist/diffs`, diff shown on
   `/watchlist` before mark-as-seen fires. Run phase4.md's 8-item TESTING list
   in a browser (needs manual Inngest-dashboard triggers for the
-  race-condition scenarios) before starting Phase 5 (Meaningfulness Engine).
+  race-condition scenarios).
+- Phase 5 built, typechecking, building, and scoring-verified (see the
+  Phase 5 section above) — meaningfulness scoring wired into
+  `GET /api/watchlist/diffs`, `change_events` persisted with snapshot-based
+  dedup, `DiffLine` shows `[Bucket, score, Confidence]` as plain text. Run
+  migration `0004` in Supabase, then phase5.md's 8-item TESTING list in a
+  browser (tests 5-8 need real multi-day data + a Clerk session) before
+  starting Phase 6 (the "While You Were Away" digest UI, spec already in
+  `phase6.md`).
