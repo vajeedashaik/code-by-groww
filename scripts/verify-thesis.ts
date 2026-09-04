@@ -3,6 +3,7 @@
  * (Phase 2-6 precedent). Run with `npm run verify:thesis`.
  */
 import { parseVerdictResponse } from "../lib/thesis/parse-verdict";
+import { selectThesisChecksToRun, type ThesisCandidate } from "../lib/thesis/trigger";
 
 let failures = 0;
 function assert(condition: boolean, message: string) {
@@ -62,6 +63,48 @@ const malformedSignal = parseVerdictResponse(
 assert(
   malformedSignal.signals[0].assessment === "neutral" && malformedSignal.signals[0].reasoning === "",
   "parseVerdictResponse: signal with missing fields defaults safely instead of throwing",
+);
+
+// --- selectThesisChecksToRun -------------------------------------------------
+function candidate(overrides: Partial<ThesisCandidate>): ThesisCandidate {
+  return {
+    symbol: "TEST",
+    bucket: "Urgent",
+    score: 1,
+    changeEventId: "evt-1",
+    existingThesisVerdict: null,
+    thesisText: "some thesis",
+    ...overrides,
+  };
+}
+
+assert(
+  selectThesisChecksToRun([candidate({ bucket: "Routine" })]).length === 0,
+  "selectThesisChecksToRun: excludes Routine bucket",
+);
+assert(
+  selectThesisChecksToRun([candidate({ thesisText: null })]).length === 0,
+  "selectThesisChecksToRun: excludes stocks with no thesis",
+);
+assert(
+  selectThesisChecksToRun([candidate({ thesisText: "   " })]).length === 0,
+  "selectThesisChecksToRun: excludes whitespace-only thesis",
+);
+assert(
+  selectThesisChecksToRun([candidate({ existingThesisVerdict: "supports" })]).length === 0,
+  "selectThesisChecksToRun: excludes already-assessed change events",
+);
+assert(
+  selectThesisChecksToRun([candidate({ changeEventId: null })]).length === 0,
+  "selectThesisChecksToRun: excludes diffs with no change event id",
+);
+
+const many: ThesisCandidate[] = Array.from({ length: 8 }, (_, i) => candidate({ symbol: `S${i}`, score: i }));
+const selected = selectThesisChecksToRun(many, 5);
+assert(selected.length === 5, "selectThesisChecksToRun: respects the cap");
+assert(
+  selected.map((c) => c.symbol).join(",") === "S7,S6,S5,S4,S3",
+  "selectThesisChecksToRun: picks highest score first",
 );
 
 if (failures > 0) {
