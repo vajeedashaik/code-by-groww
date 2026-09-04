@@ -6,9 +6,160 @@ Living status doc. Update at the end of each phase.
 
 Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
 
-**Stack:** Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk (auth) · Supabase (Postgres + RLS).
+**Stack:** Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk (auth) · Supabase (Postgres + RLS) · Inngest (scheduled jobs) · yahoo-finance2 + Finnhub (market data).
 
-**Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3–9 (market data, scoring, digest, thesis, …).
+**Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4–9 (seen-state/diffing, scoring, digest, thesis, …).
+
+## Current state — Phase 3: Market Data Pipeline (COMPLETE, pending browser verification)
+
+Two Inngest scheduled jobs now keep real prices and daily history flowing into
+`market_snapshots` and `daily_history` for every symbol across all users'
+watchlists, and `/watchlist` shows the real price + % change (or a clean
+"Fetching price…" state) instead of the Phase 2 placeholder. No scoring,
+meaningfulness engine, digest, or thesis usage yet — those stay for later
+phases.
+
+### What is built (Phase 3)
+
+| Area | Files |
+| --- | --- |
+| Adapter types | `lib/market-data/types.ts` — `Quote`, `DailyBar`, `MarketDataSource` interface, `MarketDataError` (code + symbol + source + optional `cause`) |
+| Staleness | `lib/market-data/staleness.ts` — `classifyStaleness(fetchedAt, now?)`: FRESH <2min, DELAYED 2–10min (inclusive), STALE >10min; canonical (only) home of `MarketSnapshotStatus` |
+| Yahoo source | `lib/market-data/sources/yahoo.ts` — primary source via `yahoo-finance2` v4's class API; `getQuote` + `getDailyHistory` (drops the in-progress today-dated bar); maps 429/not-found/other errors to `MarketDataError` codes; 8s timeout |
+| Finnhub source | `lib/market-data/sources/finnhub.ts` — secondary source, US symbols only (`supports()` false for `.NS`/`.BO`); reuses `FINNHUB_API_KEY`; key sent via `X-Finnhub-Token` header; declines `getDailyHistory` (paid endpoint on free tier) |
+| Facade | `lib/market-data/index.ts` — the only module consumers import; `getQuote` (best single answer), `getAllQuotes` (every source's quotes + per-source errors, for the snapshot job's partial-failure tracking), `getDailyHistory` (first source that answers) |
+| Inngest client | `lib/inngest/client.ts` — single `Inngest` instance, `isDev` pinned outside production so local dev needs no event/signing keys |
+| Job helpers | `lib/inngest/functions/shared.ts` — `loadWatchlistSymbols()` (distinct, trimmed, upper-cased symbols via the admin/service-role client), `chunk()` |
+| Snapshot job | `lib/inngest/functions/snapshot-ingest.ts` — cron `*/5 * * * *` + `market/snapshot.requested` event; chunks of 5 symbols with a 1s gap; writes one `market_snapshots` row per source that answered; per-symbol total failure -> `failures`, a secondary source failing while the symbol still got data -> `secondaryFailures`; also decays the status of recent (last 15 min) existing rows before inserting new ones |
+| History job | `lib/inngest/functions/daily-history-backfill.ts` — cron `30 1 * * *` + `market/history.requested` event; same chunking/partial-failure pattern; upserts `daily_history` on `(symbol, date)`; `HISTORY_DAYS = 60` calendar days requested |
+| Inngest route | `app/api/inngest/route.ts` — `serve()` registering both functions; not Clerk-protected (confirmed by curl: `function_count: 2`, HTTP 200, no redirect/401) |
+| Dev trigger | `app/api/dev/trigger/route.ts` — Clerk-gated, 404s in production; `GET`/`POST /api/dev/trigger?job=snapshot\|history` fires the corresponding event; GET is deliberately state-changing for curl convenience (documented trade-off, narrow blast radius) |
+| Price UI | `components/watchlist/price-cell.tsx` — server component; formats INR price + colored % change, or a muted "Fetching price…" badge when no snapshot exists yet |
+| Modified | `app/(protected)/watchlist/page.tsx` (joins latest `market_snapshots` + `daily_history` per symbol, bounded with `.limit(symbols.length * 10)`), `package.json` (`yahoo-finance2`, `inngest`, `inngest-cli` deps + `npm run inngest` script), `next.config.ts`, `.env.example` (Phase 3 + Inngest sections), `README.md` (Phase 3 sections + routes/scripts tables) |
+
+### Phase 3 verification
+
+- `npm run typecheck` (`tsc --noEmit`) — exit 0, no output.
+- `npm run build` (`next build`) — compiled successfully in ~8.5s, 10 routes +
+  middleware, 0 errors. `/api/inngest` and `/api/dev/trigger` both listed as
+  dynamic (ƒ) routes.
+- **Backend smoke test** (Part D of Task 15 — no browser/Clerk session
+  available, so this validates the pipeline at the data layer instead):
+  - Started `npm run dev` + `npm run inngest` (dev servers on :3000/:8288);
+    confirmed both up (`/api/inngest` → `function_count: 2`, `:8288` → 200).
+  - Inserted two temporary `watchlist_items` rows under a fake
+    `user_id: "test-phase3-verification"`: `RELIANCE.NS` (real, liquid) and
+    `ZZFAKE123.NS` (nonsense).
+  - Fired `market/snapshot.requested` directly at the Inngest dev server's
+    event endpoint (`POST http://localhost:8288/e/<key>`) — no Clerk cookie
+    needed for this path. Run completed; querying `market_snapshots` showed
+    **exactly one new row, for `RELIANCE.NS`** (yahoo, real price ₹1322,
+    volume, `status: FRESH`) and **zero rows for `ZZFAKE123.NS`** — the
+    partial-failure contract holds: one bad symbol is skipped, everything
+    else still processed.
+  - Fired `market/history.requested` the same way. Run completed; querying
+    `daily_history` showed **44 dated rows for `RELIANCE.NS`** (matches the
+    ~45-trading-day target from 60 requested calendar days) and **zero rows
+    for `ZZFAKE123.NS`**.
+  - Cleaned up: deleted both temporary `watchlist_items` rows, deleted the
+    one `market_snapshots` row this test created (by its known id), and
+    confirmed no `ZZFAKE123.NS` rows existed in either table to delete.
+    `RELIANCE.NS`'s `daily_history` rows were deliberately **left in place**
+    — that table has no created/fetched timestamp to distinguish "this
+    test's rows" from pre-existing real backfill data, and the rows are
+    exactly the legitimate demo data Phase 3 is meant to produce, not test
+    pollution. Stopped both dev servers by PID and confirmed via `netstat`
+    that no LISTENING socket remains on :3000 or :8288.
+  - This is a genuine end-to-end pass of both jobs against the real Supabase
+    project, exercising real Yahoo Finance data and the exact partial-failure
+    path required by acceptance test 3.
+
+**Phase 3 acceptance tests (from README) — status:**
+
+| # | Test | Status |
+| - | --- | --- |
+| 1 | Trigger snapshot → new rows for every watchlisted symbol | Verified (data layer) via the smoke test above; the *UI* half (visually confirming in the Inngest dashboard / Supabase table view) is still the user's job |
+| 2 | Add a new stock, trigger again → snapshot appears for it too | Not run — needs the `/watchlist` add-stock UI (Clerk session) to add a stock the normal way; user must run this |
+| 3 | Nonsense symbol → logged/skipped, others still processed | **Verified** — `ZZFAKE123.NS` produced zero rows in both tables while `RELIANCE.NS` succeeded, in the same run |
+| 4 | Trigger history → multiple dated rows per symbol | **Verified** — 44 dated rows for `RELIANCE.NS` |
+| 5 | Reload `/watchlist` → real price + % change | Needs a browser + Clerk session — user's job |
+| 6 | New stock, view `/watchlist` before job runs → clean "Fetching price…" | Needs a browser + Clerk session — user's job |
+| 7 | Old `fetched_at` (20 min ago) → `classifyStaleness` returns STALE | Not re-verified in this pass, but covered by the function's own logic (pure, no I/O) and matches phase3.md's worked example exactly (age > 10 min → STALE); user can spot-check with a manual Supabase insert if desired |
+| 8 | Restart both dev servers clean → functions registered, cron fires on its own | Partially verified — both servers were confirmed to start clean and register (`function_count: 2`); waiting for the cron to fire unattended (5 min / next-day) was out of scope for this bounded smoke test — user's job |
+
+### Phase 3 manual steps outstanding (from phase3.md's "MANUAL STEPS")
+
+- [ ] Run `npx inngest-cli dev` locally alongside `npm run dev` (now documented
+  as `npm run inngest` in the README) — needed every time you want the
+  scheduled/background functions to actually execute in dev.
+- [ ] Manually trigger both jobs via the Inngest dev dashboard
+  (`http://localhost:8288`) and visually confirm the rows in Supabase's table
+  editor — the smoke test above confirmed this at the data layer, but you
+  should see it with your own eyes at least once.
+- [ ] Watch the Finnhub usage dashboard while testing to confirm you're not
+  approaching rate limits (Finnhub is only hit for US symbols in this repo's
+  current watchlist contents, so usage should be low, but confirm at scale).
+- [ ] Confirm the 5-minute polling interval is acceptable at your real
+  watchlist scale — already chosen and documented in the README, but you
+  should confirm it holds up once you have a realistic number of symbols.
+- [ ] If you deploy to Vercel before the hackathon deadline, Inngest functions
+  need separate registration with Inngest Cloud plus `INNGEST_EVENT_KEY` /
+  `INNGEST_SIGNING_KEY` set in that environment — not needed for local
+  dev/demo, but flag it before deploying.
+
+### Phase 3 deviations from spec
+
+1. **Inngest v4's real API differs from what phase3.md assumed.**
+   `createFunction({ id, name, triggers: [...] }, handler)` — a 2-argument
+   call with the trigger list nested inside the options object — replaces the
+   plan's literal `createFunction(config, [triggers], handler)` 3-argument
+   form. Applied consistently to both `snapshot-ingest.ts` and
+   `daily-history-backfill.ts`.
+2. **`getAllQuotes(symbol)` returns `{ quotes: Quote[]; errors: MarketDataError[] }`**
+   instead of a bare `Quote[]`, added during code review so the snapshot job
+   can distinguish "this symbol got nothing" (`failures`, a hard skip) from
+   "a secondary source failed but the symbol still got data" (tracked
+   separately as `secondaryFailures`, not a hard failure).
+3. **Task 7 (re-exporting `MarketSnapshotStatus` from `types/database.ts`) was
+   implemented then reverted before being committed** — confirmed by git
+   history: `types/database.ts` was not touched by any Phase 3 commit. The
+   file's own header says it will be regenerated by `supabase gen types`,
+   which would silently clobber a hand-added export. `MarketSnapshotStatus`
+   lives only in `lib/market-data/staleness.ts`.
+4. **`yahoo.ts`'s `getDailyHistory` drops a trailing today-dated bar** (the
+   in-progress trading session) before returning, so `daily_history` never
+   accidentally stores an intraday price as a day's official close.
+5. **`HISTORY_DAYS` is 60, not 45** — chosen to net a real ~45 trading days
+   after Yahoo's observed ~77% calendar-to-trading-day yield (weekends and
+   holidays excluded). Confirmed in the smoke test: 60 calendar days
+   requested produced 44 actual rows for `RELIANCE.NS`.
+6. **`decay-existing` in the snapshot job is bounded to a 15-minute lookback
+   window** (not a full-table scan) and parallelizes its per-row status
+   updates, to avoid an unbounded, ever-growing query as `market_snapshots`
+   accumulates history over the life of the project.
+7. **The `/watchlist` page's snapshot/history queries are bounded with
+   `.limit(symbols.length * 10)`** for the same reason — see the README's
+   "Known limitation" note. Full DB-side dedup (indexes + a `DISTINCT ON`
+   view/RPC) and a retention/pruning job for `market_snapshots` /
+   `daily_history` are accepted gaps, deferred past this hackathon phase.
+8. **`MarketDataError` gained an optional `{ cause }` passthrough** (not in
+   the original plan snippet) to preserve root-cause detail across the
+   adapter boundary without leaking it into the error's own `.message`.
+9. **Finnhub's API key is sent via the `X-Finnhub-Token` header, not the
+   `?token=` query string** — added during review so the key never appears in
+   a logged request URL (e.g. inside an `error.cause`).
+10. **`/api/dev/trigger`'s `GET` handler is intentionally state-changing**
+    (fires a job on a plain `GET`) — a deliberate, documented trade-off for
+    curl/browser-address-bar convenience on a dev-only, production-404'd,
+    Clerk-gated route, not an oversight.
+11. **The snapshot job's per-source-failure logging is not duplicated** —
+    `getAllQuotes()` already `console.warn`s each secondary-source failure
+    inside `lib/market-data/index.ts`, so `snapshot-ingest.ts` only collects
+    those into `secondaryFailures` without re-logging them; only a symbol's
+    *total* failure gets a second, more specific `console.error` in the job
+    itself. (Observed while reading the actual code for this task; not one
+    of the deviations called out in the implementation plan, but a real,
+    deliberate choice worth recording.)
 
 ## Current state — Phase 2: Watchlist CRUD (COMPLETE, pending browser verification)
 
@@ -169,6 +320,9 @@ committed with the scaffold by accident — harmless.
 ## How to continue
 
 - Local run: fill `.env.local` (now incl. `FINNHUB_API_KEY`), run migrations
-  `0001`→`0003`, `npm install`, `npm run dev`, open `http://localhost:3000`.
-- Phase 2 built and compiling. Run the README "Phase 2 acceptance tests" in a
-  browser before starting Phase 3 (Market Data Pipeline — see `phase3.md`).
+  `0001`→`0003`, `npm install`, `npm run dev` + `npm run inngest`, open
+  `http://localhost:3000`.
+- Phase 3 built, compiling, and backend-smoke-tested (see the Phase 3 section
+  above). Run the README "Phase 3 acceptance tests" in a browser — especially
+  #2, #5, #6, and the full unattended #8 — before starting Phase 4
+  (Seen-State & Diffing — see `phase4.md`, if present).

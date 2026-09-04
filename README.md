@@ -1,11 +1,13 @@
 # Smart Market Watchlist
 
-Smart market watchlist web app. **Phases 1–2 complete**: authentication
-(Clerk), database schema (Supabase + RLS), and per-user watchlist CRUD with
-stock search. No live prices, scoring, digest, or thesis usage yet.
+Smart market watchlist web app. **Phases 1–3 complete**: authentication
+(Clerk), database schema (Supabase + RLS), per-user watchlist CRUD with stock
+search, and a scheduled market-data pipeline (Inngest) that keeps real prices
+and daily history flowing. No scoring, digest, or thesis usage yet.
 
 Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk · Supabase ·
-Finnhub (stock search).
+Finnhub (stock search) · Inngest (scheduled market-data jobs) · yahoo-finance2
+(prices).
 
 ## Prerequisites
 
@@ -83,6 +85,8 @@ Open <http://localhost:3000>.
 | `/watchlist` | authenticated | Stock search + per-user watchlist CRUD (Phase 2)    |
 | `/debug`     | authenticated | **temporary** — auth + RLS + DB round-trip check   |
 | `/api/search`| authenticated | JSON stock search (Finnhub + static NSE fallback)   |
+| `/api/inngest`| internal      | Inngest sync/invoke endpoint (not user-facing)     |
+| `/api/dev/trigger` | authenticated, dev-only | Manually fire `?job=snapshot` or `?job=history` |
 
 Unauthenticated requests to `/dashboard`, `/watchlist`, or `/debug` redirect to
 sign-in (`middleware.ts`); `/api/search` returns `401`.
@@ -118,6 +122,64 @@ supabase/migrations/      versioned SQL — run in the dashboard
 | `npm run build`     | production build                  |
 | `npm run start`     | serve the production build        |
 | `npm run typecheck` | `tsc --noEmit`                    |
+| `npm run inngest`   | Inngest dev server (run alongside `npm run dev`) |
+
+## Phase 3: market data
+
+Two Inngest jobs keep prices flowing:
+
+- **snapshot-ingest** — cron `*/5 * * * *`. Writes a `market_snapshots` row per
+  source (yahoo for all symbols, Finnhub also for US symbols) for every distinct
+  symbol in any user's watchlist. Per-symbol failures are logged and skipped;
+  a secondary source failing (yahoo still succeeded) is tracked separately as
+  `secondaryFailures`, not a hard failure.
+- **daily-history-backfill** — cron `30 1 * * *`. Upserts ~45 trading days
+  (60 calendar days requested) of daily closes per symbol into `daily_history`
+  (Phase 5 volatility/benchmark input).
+
+**Chosen polling interval: 5 minutes.** Staleness bands
+(`lib/market-data/staleness.ts`): FRESH <2 min, DELAYED 2–10 min, STALE >10 min.
+In steady state the watchlist price reads as DELAYED — that is honest (last
+fetch 3–5 min ago), and nothing surfaces the badge until Phase 8.
+
+### Running the jobs in dev
+
+```bash
+npm run dev        # terminal 1
+npm run inngest    # terminal 2 — inngest-cli dev, dashboard on :8288
+```
+
+Trigger on demand without waiting for the cron: while signed in, visit
+`http://localhost:3000/api/dev/trigger?job=snapshot` (or `?job=history`) in the
+browser, or use the **Invoke** button in the Inngest dashboard at
+http://localhost:8288.
+
+No new SQL migration — `market_snapshots` and `daily_history` were created in
+Phase 1's `0001_init.sql`.
+
+**Known limitation:** neither `market_snapshots` nor `daily_history` has an
+index beyond its primary key, and neither has a retention/pruning job — both
+grow without bound as the cron jobs run. The `/watchlist` page bounds its own
+read with `.limit()` as a stopgap; a proper fix (a `DISTINCT ON` view/RPC, or
+dedicated indexes plus pruning) is deferred past this hackathon phase.
+
+## Phase 3 acceptance tests
+
+1. Trigger `?job=snapshot` → new `market_snapshots` rows for every symbol in any
+   watchlist.
+2. Add a new stock (Phase 2 flow) → trigger again → a snapshot appears for it
+   too (proves the job reads `watchlist_items` live, not a hardcoded list).
+3. Put a nonsense symbol on a watchlist directly in Supabase → trigger → it is
+   logged/skipped in the run output's `failures`, every other symbol still
+   processed.
+4. Trigger `?job=history` → `daily_history` has multiple dated rows per symbol.
+5. Reload `/watchlist` → real price + % change for symbols that have snapshots.
+6. Add a brand-new stock, open `/watchlist` before the job runs → clean
+   "Fetching price…", no crash, no fake ₹0.
+7. Insert a `market_snapshots` row with `fetched_at` 20 minutes ago →
+   `classifyStaleness` returns `STALE` for it.
+8. Restart `npm run dev` + `npm run inngest` clean → both functions show in the
+   dashboard and the cron fires on its own.
 
 ## Phase 2 acceptance tests
 
