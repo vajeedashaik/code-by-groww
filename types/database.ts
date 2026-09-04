@@ -53,6 +53,10 @@ export interface Database {
           source: string;
           fetched_at: string;
           status: string;
+          conflict: boolean;
+          alt_source: string | null;
+          alt_price: number | null;
+          alt_fetched_at: string | null;
         };
         Insert: {
           id?: string;
@@ -62,6 +66,10 @@ export interface Database {
           source: string;
           fetched_at?: string;
           status?: string;
+          conflict?: boolean;
+          alt_source?: string | null;
+          alt_price?: number | null;
+          alt_fetched_at?: string | null;
         };
         Update: {
           id?: string;
@@ -71,6 +79,10 @@ export interface Database {
           source?: string;
           fetched_at?: string;
           status?: string;
+          conflict?: boolean;
+          alt_source?: string | null;
+          alt_price?: number | null;
+          alt_fetched_at?: string | null;
         };
         Relationships: [];
       };
@@ -168,6 +180,45 @@ export interface Database {
             referencedColumns: ["id"];
           },
         ];
+      };
+      alerts: {
+        Row: {
+          id: string;
+          user_id: string;
+          symbol: string;
+          company_name: string | null;
+          alert_type: string;
+          threshold: number;
+          active: boolean;
+          last_triggered_at: string | null;
+          cooldown_minutes: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string; // defaults to auth.jwt()->>'sub'
+          symbol: string;
+          company_name?: string | null;
+          alert_type: string;
+          threshold: number;
+          active?: boolean;
+          last_triggered_at?: string | null;
+          cooldown_minutes?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          symbol?: string;
+          company_name?: string | null;
+          alert_type?: string;
+          threshold?: number;
+          active?: boolean;
+          last_triggered_at?: string | null;
+          cooldown_minutes?: number;
+          created_at?: string;
+        };
+        Relationships: [];
       };
     };
     Views: Record<never, never>;

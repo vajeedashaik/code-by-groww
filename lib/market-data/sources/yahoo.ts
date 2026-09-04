@@ -1,7 +1,7 @@
 import "server-only";
 import YahooFinance from "yahoo-finance2";
 import { MarketDataError } from "@/lib/market-data/types";
-import type { DailyBar, MarketDataSource, Quote } from "@/lib/market-data/types";
+import type { DailyBar, MarketDataSource, OhlcBar, Quote } from "@/lib/market-data/types";
 
 /**
  * Primary market-data source. yahoo-finance2 is an unofficial scraper of
@@ -131,3 +131,51 @@ export const yahooSource: MarketDataSource = {
     }
   },
 };
+
+/**
+ * Full OHLC bars for candlestick chart rendering — display-only, never fed
+ * into scoring/history backfill (those stay on `getDailyHistory`'s close-only
+ * shape). Yahoo-only: it is the only source whose /chart endpoint we use for
+ * history in this app (see MarketDataSource's `getDailyHistory` doc above).
+ */
+export async function getCandles(symbol: string, days: number): Promise<OhlcBar[]> {
+  const normSymbol = symbol.trim().toUpperCase();
+  const period1 = new Date();
+  period1.setDate(period1.getDate() - days);
+  try {
+    const result = await withTimeout(
+      yahooFinance.chart(symbol, { period1, interval: "1d" }),
+      symbol,
+      "yahoo",
+    );
+    const rows = (result?.quotes ?? [])
+      .filter(
+        (r): r is typeof r & { date: Date; open: number; high: number; low: number; close: number } =>
+          r.date instanceof Date &&
+          typeof r.open === "number" &&
+          typeof r.high === "number" &&
+          typeof r.low === "number" &&
+          typeof r.close === "number" &&
+          Number.isFinite(r.close),
+      )
+      .map((r) => ({
+        symbol: normSymbol,
+        date: r.date.toISOString().slice(0, 10),
+        open: r.open,
+        high: r.high,
+        low: r.low,
+        close: r.close,
+        volume: typeof r.volume === "number" ? r.volume : null,
+      }));
+    const today = new Date().toISOString().slice(0, 10);
+    if (rows.length > 0 && rows[rows.length - 1].date === today) {
+      rows.pop();
+    }
+    if (rows.length === 0) {
+      throw new MarketDataError("NOT_FOUND", symbol, "yahoo", "no history");
+    }
+    return rows;
+  } catch (err) {
+    throw toMarketDataError(err, symbol);
+  }
+}

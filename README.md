@@ -1,242 +1,167 @@
 # Smart Market Watchlist
 
-Smart market watchlist web app. **Phases 1–3 complete**: authentication
-(Clerk), database schema (Supabase + RLS), per-user watchlist CRUD with stock
-search, and a scheduled market-data pipeline (Inngest) that keeps real prices
-and daily history flowing. No scoring, digest, or thesis usage yet.
+A watchlist that remembers exactly what you last saw, and only interrupts you
+again when a stock's move is genuinely meaningful — not just loud. Every
+change is scored against the stock's own normal volatility and the broader
+market/sector move, so a routine wobble on a choppy stock never crowds out a
+quiet move on a calm one that actually matters. Flag a stock with your own
+thesis, and one AI check reads recent news to tell you if that thesis still
+holds.
 
-Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk · Supabase ·
-Finnhub (stock search) · Inngest (scheduled market-data jobs) · yahoo-finance2
-(prices).
+**The core insight:** most "market dashboard" products compete on more data,
+more charts, more tickers on screen. This one competes on *memory and
+attention* — it's the only piece of state a user-facing dashboard usually
+throws away between visits ("what did I already see?"), and restoring it is
+what turns a wall of numbers into a short, honest "here's what changed."
+
+Built solo in a 72-hour hackathon. Stack: Next.js 15 (App Router) ·
+TypeScript · Tailwind CSS v4 · Clerk (auth) · Supabase (Postgres + RLS) ·
+Inngest (scheduled jobs) · yahoo-finance2 + Finnhub (market data) · Gemini
+(the one AI touchpoint).
+
+## Key decisions (judge-facing)
+
+**Why this architecture, not microservices?** One Next.js app + Supabase +
+Inngest. Solo, 72 hours, a handful of scheduled jobs and one request path —
+microservices would add deployment/coordination overhead with no benefit at
+this scale. Inngest gives the one thing a monolith doesn't have natively
+(durable scheduled/background jobs with retries) without standing up
+infrastructure.
+
+**Why this meaningfulness algorithm?** A weighted composite of four
+volatility-normalized z-scores — price anomaly (0.4), volume anomaly (0.2),
+market-relative move (0.2), sector-relative move (0.2) — all divided by the
+stock's own 20-day volatility, so "how unusual is this *for this stock*"
+drives the ranking, not raw magnitude. Bucketed at `Urgent ≥ 2.0`,
+`Notable ≥ 0.8` (`lib/scoring/score.ts`). Verified against two worked
+scenarios before shipping: a choppy 5%/day stock riding a broad +5% rally on
+a +7% move scores 0.68/Routine, while a calm 1%/day stock with a flat market
+and a 4x volume surge on a +3% move scores 2.94/Urgent — confirming the
+engine correctly ranks "genuinely independent move" above "large move that's
+mostly market noise."
+
+**How staleness/conflicts are handled?** Price freshness is banded — FRESH
+(<2 min), DELAYED (2–10 min), STALE (>10 min) — and shown as a badge next to
+every price; a STALE reading also forces that change's confidence down to
+`Low`, never scored as if it were reliable. When Yahoo and Finnhub disagree
+on a US-listed symbol's price by more than 0.1% at roughly the same moment,
+neither value is averaged or hidden — both are kept, Yahoo's is used
+(documented priority: free, unlimited, covers every symbol tracked including
+NSE), and the disagreement is shown in the "why is this flagged?" detail
+view. See `lib/market-data/reconcile.ts`.
+
+**Why not custom sector-classification data?** A static 6-sector ×
+5-large-cap NSE symbol→sector map (`lib/market-data/sectors.ts`) plus Nifty
+50 as the market benchmark, instead of a live sector-classification API. The
+trade-off: any symbol outside that hand-picked set gets `sector_used: null`
+and degrades gracefully to a market-only comparison (`Medium` confidence,
+never a crash) — accepted because building/maintaining a general sector
+taxonomy wasn't the interesting problem to solve in 72 hours; the scoring
+*math* was.
+
+**Why AI only for thesis-relevance, never the score?** Every other signal —
+price/volume anomaly, market/sector relativity, bucket, confidence — is
+deterministic and reproducible from raw numbers. Judging whether a news
+headline "supports" or "contradicts" a free-text reason a human wrote is a
+natural-language reasoning task with no formula, so it's isolated as one
+narrow, opt-in-per-stock, cost-capped layer (Gemini via Inngest
+`step.ai.infer`, structured JSON output, capped at 5 checks per digest load)
+that degrades to `unavailable` on any failure without touching anything
+else. The deterministic score is never a function of what the AI says.
+
+**Chosen final numbers:** 5-minute snapshot polling interval
+(`*/5 * * * *`); `RECONCILE_TOLERANCE_MS = 60_000`,
+`CONFLICT_THRESHOLD_PCT = 0.1`; `SCORE_WEIGHTS = { priceAnomaly: 0.4,
+volumeAnomaly: 0.2, marketRelative: 0.2, sectorRelative: 0.2 }`,
+`BUCKET_THRESHOLDS = { urgent: 2.0, notable: 0.8 }`.
 
 ## Prerequisites
 
 - Node 20+ and npm
 - A [Clerk](https://dashboard.clerk.com) account
 - A [Supabase](https://supabase.com/dashboard) project
+- A free [Finnhub](https://finnhub.io) API key
+- A free [Gemini](https://aistudio.google.com/apikey) API key
 
-## Setup
+## Run it locally
 
-### 1. Clerk application
+1. **Clerk** — create an application, copy the Publishable + Secret key from
+   **API Keys**.
+2. **Supabase** — create a project, copy the Project URL + anon key +
+   service_role key from **Project Settings → API**.
+3. **Run the migrations** — in the Supabase SQL Editor, run every file in
+   `supabase/migrations/` in order (`0001` → `0005`), or run
+   `supabase/schema.sql` once for the same result.
+4. **Wire Clerk ↔ Supabase** — Supabase **Authentication → Sign In /
+   Providers → Third Party Auth → Add provider → Clerk**, follow the
+   "Connect with Supabase" flow, save the Clerk domain it gives you.
+5. **Env vars** — `cp .env.example .env.local`, fill every value (Clerk,
+   Supabase, `FINNHUB_API_KEY`, `GEMINI_API_KEY`).
+6. **Run:**
+   ```bash
+   npm install
+   npm run dev        # terminal 1 — app on :3000
+   npm run inngest     # terminal 2 — Inngest dev server + dashboard on :8288
+   ```
 
-1. Create an application in the Clerk dashboard.
-2. **API Keys** → copy the **Publishable key** and **Secret key**.
-
-### 2. Supabase project
-
-1. Create a project in the Supabase dashboard.
-2. **Project Settings → API** → copy the **Project URL**, the **anon / publishable**
-   key, and the **service_role / secret** key.
-
-### 3. Run the migrations
-
-In the Supabase **SQL Editor**, run these files in order:
-
-1. `supabase/migrations/0001_init.sql` — creates the five tables.
-2. `supabase/migrations/0002_rls.sql` — enables RLS and adds policies.
-3. `supabase/migrations/0003_watchlist_company_name.sql` — adds
-   `watchlist_items.company_name` (Phase 2).
-
-(`supabase/schema.sql` is the same content combined, for reference only.)
-
-### 4. Wire Clerk as a third-party auth provider for Supabase
-
-Uses Clerk's **native** Supabase integration (the JWT template is deprecated).
-
-1. In Supabase: **Authentication → Sign In / Providers → Third Party Auth** →
-   **Add provider → Clerk**.
-2. Open the "Connect with Supabase" page linked in that modal (it goes to Clerk),
-   pick this Clerk app, enable the integration, and copy the **Clerk domain** it
-   shows.
-3. Paste that domain into the Supabase provider settings and save.
-
-RLS policies read the Clerk user id from `auth.jwt() ->> 'sub'`. The app's
-Supabase clients attach the Clerk session token via the `accessToken` option
-(see `lib/supabase/`).
-
-### 5. Environment variables
-
-```bash
-cp .env.example .env.local
-```
-
-Fill every value in `.env.local` from steps 1–2, plus a free
-[Finnhub](https://finnhub.io) API key as `FINNHUB_API_KEY` (Phase 2 stock
-search, also used for Phase 7's company-news lookup; search falls back to a
-static NSE list if it's missing) and a free
-[Gemini](https://aistudio.google.com/apikey) API key as `GEMINI_API_KEY`
-(Phase 7 — the one AI call in this product). `.env.local` is gitignored —
-never commit real keys.
-
-### 6. Run
-
-```bash
-npm install
-npm run dev
-```
-
-Open <http://localhost:3000>.
+Open <http://localhost:3000>, sign in, add a stock. Prices/scores populate
+once the Inngest snapshot job runs (every 5 minutes on its own, or trigger
+it immediately: visit `/api/dev/trigger?job=snapshot` while signed in, or
+use the **Invoke** button in the Inngest dashboard).
 
 ## Routes
 
 | Path         | Access        | Purpose                                             |
 | ------------ | ------------- | -------------------------------------------------- |
-| `/`          | public        | Landing page                                       |
-| `/sign-in`   | public        | Clerk sign-in                                      |
-| `/sign-up`   | public        | Clerk sign-up                                      |
-| `/dashboard` | authenticated | "While you were away" digest — Urgent/Notable/Routine buckets, why-flagged detail (Phase 6) |
-| `/watchlist` | authenticated | Stock search + per-user watchlist CRUD, raw table view (Phase 2/4) |
-| `/debug`     | authenticated | **temporary** — auth + RLS + DB round-trip check   |
-| `/api/search`| authenticated | JSON stock search (Finnhub + static NSE fallback)   |
-| `/api/inngest`| internal      | Inngest sync/invoke endpoint (not user-facing)     |
-| `/api/dev/trigger` | authenticated, dev-only | Manually fire `?job=snapshot` or `?job=history` |
+| `/`          | public        | Landing page                                        |
+| `/sign-in`, `/sign-up` | public | Clerk auth                                    |
+| `/dashboard` | authenticated | The digest — "while you were away," Urgent/Notable/Routine |
+| `/watchlist` | authenticated | Search + add/remove/edit-thesis, raw table, Market Time Machine |
+| `/api/search`| authenticated | Stock search (Finnhub + static NSE fallback)        |
+| `/api/watchlist/diffs` | authenticated | Diff + score computation, one batched call |
+| `/api/inngest`| internal     | Inngest sync/invoke endpoint (not user-facing)      |
+| `/api/dev/trigger` | authenticated, dev-only | Manually fire the snapshot/history job, 404s in production |
 
-Unauthenticated requests to `/dashboard`, `/watchlist`, or `/debug` redirect to
-sign-in (`middleware.ts`); `/api/search` returns `401`.
-
-## Project layout
-
-```
-app/
-  layout.tsx              root layout, ClerkProvider, header
-  page.tsx                public landing
-  (protected)/            route group — auth.protect() gate
-    dashboard/page.tsx
-    debug/page.tsx
-    watchlist/page.tsx    watchlist view + add form
-    watchlist/actions.ts  add / remove server actions
-  api/search/route.ts     stock search (Finnhub + NSE fallback)
-  sign-in/, sign-up/      Clerk components
-components/header.tsx     app name + user menu
-components/watchlist/     add-stock + remove-stock-button client components
-lib/hooks/use-debounce.ts  debounced value hook (search input)
-lib/stocks/              NSE fallback list, search types
-lib/supabase/             server / browser / admin clients
-types/database.ts         hand-written row types
-middleware.ts             Clerk middleware, protects /dashboard + /watchlist + /debug
-supabase/migrations/      versioned SQL — run in the dashboard
-```
+Unauthenticated requests to `/dashboard` or `/watchlist` redirect to sign-in
+(`middleware.ts`, defense-in-depth re-checked in `(protected)/layout.tsx`).
+A route-level error boundary (`app/error.tsx`, `app/global-error.tsx`) keeps
+one broken component from white-screening the whole app.
 
 ## Scripts
 
 | Command             | What                              |
-| ------------------- | --------------------------------- |
-| `npm run dev`       | dev server                        |
-| `npm run build`     | production build                  |
-| `npm run start`     | serve the production build        |
-| `npm run typecheck` | `tsc --noEmit`                    |
-| `npm run inngest`   | Inngest dev server (run alongside `npm run dev`) |
-| `npm run verify:scoring` | pure-logic checks for `lib/scoring/` (Phase 5) |
-| `npm run verify:digest`  | pure-logic checks for `lib/digest/` (Phase 6)  |
-| `npm run verify:thesis`  | pure-logic checks for `lib/thesis/` (Phase 7)  |
+| -------------------- | --------------------------------- |
+| `npm run dev`        | dev server                        |
+| `npm run build`      | production build                  |
+| `npm run start`      | serve the production build        |
+| `npm run typecheck`  | `tsc --noEmit`                     |
+| `npm run inngest`    | Inngest dev server (run alongside `npm run dev`) |
+| `npm run verify:scoring` | pure-logic checks for `lib/scoring/` |
+| `npm run verify:digest`  | pure-logic checks for `lib/digest/`  |
+| `npm run verify:thesis`  | pure-logic checks for `lib/thesis/`  |
+| `npm run verify:reconcile` | pure-logic checks for `lib/market-data/reconcile.ts` |
 
-## Phase 3: market data
+No test runner (jest/vitest) is used — verification is `tsc` + `next build`
++ these four pure-logic scripts, plus manual browser testing for anything
+that needs a real Clerk session or live market data. Full phase-by-phase
+build history, deviations, and code-review findings live in `context.md`;
+the original per-phase specs are `phase1.md`–`phase9.md`.
 
-Two Inngest jobs keep prices flowing:
+## Known limitations (documented, not hidden)
 
-- **snapshot-ingest** — cron `*/5 * * * *`. Writes a `market_snapshots` row per
-  source (yahoo for all symbols, Finnhub also for US symbols) for every distinct
-  symbol in any user's watchlist. Per-symbol failures are logged and skipped;
-  a secondary source failing (yahoo still succeeded) is tracked separately as
-  `secondaryFailures`, not a hard failure.
-- **daily-history-backfill** — cron `30 1 * * *`. Upserts ~45 trading days
-  (60 calendar days requested) of daily closes per symbol into `daily_history`
-  (Phase 5 volatility/benchmark input).
-
-**Chosen polling interval: 5 minutes.** Staleness bands
-(`lib/market-data/staleness.ts`): FRESH <2 min, DELAYED 2–10 min, STALE >10 min.
-In steady state the watchlist price reads as DELAYED — that is honest (last
-fetch 3–5 min ago), and nothing surfaces the badge until Phase 8.
-
-### Running the jobs in dev
-
-```bash
-npm run dev        # terminal 1
-npm run inngest    # terminal 2 — inngest-cli dev, dashboard on :8288
-```
-
-Trigger on demand without waiting for the cron: while signed in, visit
-`http://localhost:3000/api/dev/trigger?job=snapshot` (or `?job=history`) in the
-browser, or use the **Invoke** button in the Inngest dashboard at
-http://localhost:8288.
-
-No new SQL migration — `market_snapshots` and `daily_history` were created in
-Phase 1's `0001_init.sql`.
-
-**Known limitation:** neither `market_snapshots` nor `daily_history` has an
-index beyond its primary key, and neither has a retention/pruning job — both
-grow without bound as the cron jobs run. The `/watchlist` page bounds its own
-read with `.limit()` as a stopgap; a proper fix (a `DISTINCT ON` view/RPC, or
-dedicated indexes plus pruning) is deferred past this hackathon phase.
-
-## Phase 7: AI thesis relevance
-
-For any stock that is both flagged (Urgent/Notable, Phase 5) and has a
-user-provided thesis, a Gemini call (via Inngest `step.ai.infer`, structured
-JSON output) judges whether recent Finnhub news supports, contradicts, or
-doesn't clearly affect that thesis — the one AI touchpoint in this product,
-kept fully separate from the deterministic score (it never feeds back into
-`meaningfulness_score`/`bucket`).
-
-- Triggered from `GET /api/watchlist/diffs` right after Phase 5 scoring, for
-  at most 5 highest-scoring eligible stocks per call (`lib/thesis/trigger.ts`)
-  — a cost/latency trade-off, not a hidden limit.
-- Each Inngest event carries an idempotent id
-  (`${userId}:${symbol}:${changeEventId}`), so the client's 5-second poll for
-  a pending verdict (`components/watchlist/diff-panel.tsx`) never triggers a
-  duplicate model call.
-- No news found → the model still runs and returns `no_new_information`
-  plainly, rather than the code fabricating a verdict. A broken/missing
-  `GEMINI_API_KEY` degrades to `unavailable` — the rest of the digest is
-  unaffected.
-- Edit an existing thesis from `/watchlist` ("Edit thesis") — past
-  `change_events` verdicts stay historically accurate; only future checks see
-  the new text.
-
-Verification: `npm run verify:thesis` (pure-logic checks — verdict parsing,
-cap/priority selection). Full acceptance criteria and manual testing steps:
-`phase7.md`.
-
-## Phase 3 acceptance tests
-
-1. Trigger `?job=snapshot` → new `market_snapshots` rows for every symbol in any
-   watchlist.
-2. Add a new stock (Phase 2 flow) → trigger again → a snapshot appears for it
-   too (proves the job reads `watchlist_items` live, not a hardcoded list).
-3. Put a nonsense symbol on a watchlist directly in Supabase → trigger → it is
-   logged/skipped in the run output's `failures`, every other symbol still
-   processed.
-4. Trigger `?job=history` → `daily_history` has multiple dated rows per symbol.
-5. Reload `/watchlist` → real price + % change for symbols that have snapshots.
-6. Add a brand-new stock, open `/watchlist` before the job runs → clean
-   "Fetching price…", no crash, no fake ₹0.
-7. Insert a `market_snapshots` row with `fetched_at` 20 minutes ago →
-   `classifyStaleness` returns `STALE` for it.
-8. Restart `npm run dev` + `npm run inngest` clean → both functions show in the
-   dashboard and the cron fires on its own.
-
-## Phase 2 acceptance tests
-
-1. Search "Infosys" or "TCS" → relevant results appear.
-2. Search "zzxxqq123" → clean empty state, no crash.
-3. Add a stock with a thesis → shows in `/watchlist` with the thesis text.
-4. Add a stock with no thesis → shows with no thesis line (no "null"/"undefined").
-5. Add the same stock twice → clear message, no duplicate row in Supabase.
-6. Remove a stock → confirm step, then it's gone from `/watchlist` and the DB.
-7. User B's watchlist is empty and independent of User A's.
-8. Full reload → watchlist state persists.
-9. Break `FINNHUB_API_KEY` → search degrades to the static NSE list with a
-   warning; the rest of the app is unaffected.
-
-## Phase 1 acceptance tests
-
-1. Sign up → redirected to `/dashboard`, name shows.
-2. Sign out → sign in → session persists, lands on `/dashboard`.
-3. Visit `/dashboard` while signed out → redirected to sign-in.
-4. `/debug` as User A: insert TEST row, reads back, deletes.
-5. User B cannot see or query User A's `watchlist_items` rows (RLS enforced).
-6. All five tables exist with correct columns/constraints — check
-   `unique(user_id, symbol)` on `watchlist_items` and the composite PK on
-   `user_seen_state`.
-7. Fresh clone + `.env.local` filled → `npm run dev` boots with no
-   missing-config errors.
+- **No pruning/indexing on `market_snapshots`/`daily_history`** beyond
+  primary keys — both grow unbounded as the cron jobs run; reads bound
+  themselves with `.limit()` as a stopgap. A "next steps at scale" answer:
+  a `DISTINCT ON` view/RPC plus retention policy, not implemented here.
+- **Sector mapping is a static, hand-picked list** (6 sectors × 5 NSE
+  large-caps) — see "why not custom sector-classification data" above.
+- **Dual-source conflict detection only exists for US-listed symbols** —
+  Finnhub's free tier doesn't quote NSE stocks, so reconciliation only
+  triggers where both a Yahoo and Finnhub quote exist.
+- **Performance at 30–50 stocks** — the diffs API and scoring pipeline are
+  built to stay batched (a fixed small number of queries regardless of
+  watchlist size, see `lib/watchlist/diff.ts` and
+  `lib/scoring/history.ts`), but real load numbers at that scale require a
+  live Supabase + market-data run and are recorded separately once measured
+  (this needs a real account and API keys, so it's a manual step — see
+  `phase9.md` task 3).

@@ -3,7 +3,6 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 // Route group (protected)/ does not appear in the URL, so match concrete paths.
 const isProtectedRoute = createRouteMatcher([
   "/dashboard(.*)",
-  "/debug(.*)",
   "/watchlist(.*)",
 ]);
 

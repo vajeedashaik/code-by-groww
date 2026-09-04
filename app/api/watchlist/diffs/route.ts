@@ -29,6 +29,12 @@ import type { ThesisField } from "@/lib/thesis/types";
  * call to the Inngest dev server/Cloud), but the Inngest function itself is
  * never awaited — this response always returns immediately regardless of
  * Gemini latency (phase7.md task 4's "never block the page load" rule).
+ *
+ * Phase 8 audit fix: inngest.send() failing (dev server not running, Cloud
+ * unreachable) used to reject the whole Promise.all and 500 this entire
+ * route -- taking the price/score display down over an unrelated AI-trigger
+ * failure. Each send is now isolated so a broken event bus only costs that
+ * one thesis check, never the diffs response itself.
  */
 export async function GET() {
   const { userId } = await auth();
@@ -64,21 +70,32 @@ export async function GET() {
   const toRun = selectThesisChecksToRun(candidates);
 
   await Promise.all(
-    toRun.map((c) => {
+    toRun.map(async (c) => {
       const score = scores.get(c.symbol);
-      if (!score || !c.changeEventId) return Promise.resolve();
-      return inngest.send({
-        id: `${userId}:${c.symbol}:${c.changeEventId}`,
-        name: "thesis/relevance.requested",
-        data: {
-          userId,
-          symbol: c.symbol,
-          companyName: companyNameBySymbol.get(c.symbol) ?? null,
-          thesisText: c.thesisText,
-          changeEventId: c.changeEventId,
-          explanation: score.explanation,
-        },
-      });
+      if (!score || !c.changeEventId) return;
+      try {
+        await inngest.send({
+          id: `${userId}:${c.symbol}:${c.changeEventId}`,
+          name: "thesis/relevance.requested",
+          data: {
+            userId,
+            symbol: c.symbol,
+            companyName: companyNameBySymbol.get(c.symbol) ?? null,
+            thesisText: c.thesisText,
+            changeEventId: c.changeEventId,
+            explanation: score.explanation,
+          },
+        });
+      } catch (err) {
+        // Inngest unreachable (dev server down, Cloud outage) must not take
+        // the whole diffs response down — the price/score fields above are
+        // already computed and worth returning even if this one thesis
+        // check can't be triggered right now (it will simply retry on the
+        // next fetch/poll).
+        console.error(
+          `[diffs] failed to send thesis/relevance.requested for ${c.symbol}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
     }),
   );
 

@@ -14,6 +14,8 @@ export interface SymbolDiff {
   isFirstView: boolean;
   /** The market_snapshots row id treated as "now" for this diff — the change_events dedup key. Null when no current snapshot exists yet. */
   currentSnapshotId: string | null;
+  /** fetched_at of the "now" snapshot — Phase 8 staleness badges read this directly, no extra query. Null when no current snapshot exists yet. */
+  currentSnapshotFetchedAt: string | null;
   priceThen: number | null;
   priceNow: number | null;
   priceDelta: number | null;
@@ -22,6 +24,12 @@ export interface SymbolDiff {
   volumeNow: number | null;
   timeElapsedMs: number | null;
   seenAt: string | null;
+  /** Phase 8: true when the "now" snapshot's source disagreed with the alternate source beyond the documented threshold. */
+  conflict: boolean;
+  altSource: string | null;
+  altPrice: number | null;
+  /** Which source the "now" snapshot's price came from (e.g. "yahoo") — the Time Machine / conflict UI names it directly rather than guessing. */
+  usedSource: string | null;
 }
 
 /**
@@ -48,7 +56,7 @@ export async function computeDiffsForUser(
       .in("symbol", symbols),
     supabase
       .from("market_snapshots")
-      .select("id, symbol, price, volume, source, fetched_at")
+      .select("id, symbol, price, volume, source, fetched_at, conflict, alt_source, alt_price")
       .in("symbol", symbols)
       .order("fetched_at", { ascending: false })
       .limit(symbols.length * 10),
@@ -100,6 +108,7 @@ export async function computeDiffsForUser(
         symbol,
         isFirstView: true,
         currentSnapshotId: current?.id ?? null,
+        currentSnapshotFetchedAt: current?.fetched_at ?? null,
         priceThen: null,
         priceNow: current?.price ?? null,
         priceDelta: null,
@@ -108,6 +117,10 @@ export async function computeDiffsForUser(
         volumeNow: current?.volume ?? null,
         timeElapsedMs: null,
         seenAt: null,
+        conflict: current?.conflict ?? false,
+        altSource: current?.alt_source ?? null,
+        altPrice: current?.alt_price ?? null,
+        usedSource: current?.source ?? null,
       };
     }
 
@@ -122,6 +135,7 @@ export async function computeDiffsForUser(
       symbol,
       isFirstView: false,
       currentSnapshotId: current?.id ?? null,
+      currentSnapshotFetchedAt: current?.fetched_at ?? null,
       priceThen: then.price,
       priceNow,
       priceDelta,
@@ -130,6 +144,10 @@ export async function computeDiffsForUser(
       volumeNow: current?.volume ?? null,
       timeElapsedMs: Date.now() - new Date(seen.seen_at).getTime(),
       seenAt: seen.seen_at,
+      conflict: current?.conflict ?? false,
+      altSource: current?.alt_source ?? null,
+      altPrice: current?.alt_price ?? null,
+      usedSource: current?.source ?? null,
     };
   });
 }

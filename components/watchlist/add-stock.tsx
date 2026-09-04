@@ -7,6 +7,8 @@ import type {
   StockSearchResult,
 } from "@/lib/stocks/types";
 import { addWatchlistItem } from "@/app/(protected)/watchlist/actions";
+import GlassCard from "@/components/ui/glass-card";
+import Button from "@/components/ui/button";
 
 type Feedback = { ok: boolean; text: string } | null;
 
@@ -120,23 +122,23 @@ export default function AddStock() {
           onFocus={() => {
             if (results.length || searchError) setOpen(true);
           }}
-          className="w-full rounded border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+          className="glass w-full rounded-2xl px-4 py-3 text-sm text-white placeholder:text-white/30 outline-none transition-colors focus:border-pulse/40"
         />
 
         {open && (
-          <div className="absolute z-10 mt-1 w-full rounded border border-gray-200 bg-white shadow-lg">
+          <div className="glass-raised absolute z-10 mt-2 w-full overflow-hidden rounded-2xl">
             {searching && (
-              <div className="px-3 py-2 text-sm text-gray-500">Searching…</div>
+              <div className="px-3.5 py-2.5 text-sm text-white/45">Searching…</div>
             )}
 
             {searchError && (
-              <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              <div className="border-b border-warn/15 bg-warn/5 px-3.5 py-2 text-xs text-warn">
                 {searchError}
               </div>
             )}
 
             {!searching && results.length === 0 && !searchError && (
-              <div className="px-3 py-2 text-sm text-gray-500">
+              <div className="px-3.5 py-2.5 text-sm text-white/45">
                 No matches. Try a different name or symbol.
               </div>
             )}
@@ -147,14 +149,14 @@ export default function AddStock() {
                   <button
                     type="button"
                     onClick={() => pick(r)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-gray-50"
+                    className="flex w-full items-center justify-between gap-3 px-3.5 py-2.5 text-left text-sm transition-colors hover:bg-white/5"
                   >
                     <span>
-                      <span className="font-medium">{r.symbol}</span>
-                      <span className="ml-2 text-gray-500">{r.name}</span>
+                      <span className="font-medium text-white/90">{r.symbol}</span>
+                      <span className="ml-2 text-white/45">{r.name}</span>
                     </span>
                     {r.origin === "nse-fallback" && (
-                      <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-500">
+                      <span className="shrink-0 rounded-full bg-white/8 px-1.5 py-0.5 text-[10px] tracking-wide text-white/45 uppercase">
                         NSE
                       </span>
                     )}
@@ -167,26 +169,26 @@ export default function AddStock() {
       </div>
 
       {selected && (
-        <div className="rounded border border-gray-200 p-4">
+        <GlassCard className="p-4 sm:p-5">
           <div className="flex items-center justify-between">
             <div className="text-sm">
-              <span className="font-medium">{selected.symbol}</span>
-              <span className="ml-2 text-gray-500">{selected.name}</span>
+              <span className="font-medium text-white/90">{selected.symbol}</span>
+              <span className="ml-2 text-white/45">{selected.name}</span>
             </div>
             <button
               type="button"
               onClick={() => setSelected(null)}
-              className="text-xs text-gray-400 hover:text-gray-600"
+              className="text-xs text-white/30 hover:text-white/60"
             >
               Cancel
             </button>
           </div>
 
-          <div className="mt-3 space-y-3">
+          <div className="mt-3.5 space-y-3.5">
             <div>
               <label
                 htmlFor="thesis"
-                className="block text-xs font-medium text-gray-600"
+                className="block text-xs font-medium text-white/45"
               >
                 Why are you watching this? (optional)
               </label>
@@ -195,14 +197,14 @@ export default function AddStock() {
                 rows={2}
                 value={thesis}
                 onChange={(e) => setThesis(e.target.value)}
-                className="mt-1 w-full rounded border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+                className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors focus:border-pulse/50"
               />
             </div>
 
             <div>
               <label
                 htmlFor="target"
-                className="block text-xs font-medium text-gray-600"
+                className="block text-xs font-medium text-white/45"
               >
                 Target price (optional)
               </label>
@@ -213,30 +215,19 @@ export default function AddStock() {
                 step="any"
                 value={targetPrice}
                 onChange={(e) => setTargetPrice(e.target.value)}
-                className="mt-1 w-40 rounded border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+                className="mt-1.5 w-40 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors focus:border-pulse/50"
               />
             </div>
 
-            <button
-              type="button"
-              onClick={submit}
-              disabled={pending}
-              className="rounded bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-50"
-            >
+            <Button type="button" onClick={submit} disabled={pending} size="md">
               {pending ? "Adding…" : "Add to watchlist"}
-            </button>
+            </Button>
           </div>
-        </div>
+        </GlassCard>
       )}
 
       {feedback && (
-        <p
-          className={`text-sm ${
-            feedback.ok ? "text-green-600" : "text-red-600"
-          }`}
-        >
-          {feedback.text}
-        </p>
+        <p className={`text-sm ${feedback.ok ? "text-up" : "text-down"}`}>{feedback.text}</p>
       )}
     </div>
   );

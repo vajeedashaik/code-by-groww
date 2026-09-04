@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { WatchlistDiffsProvider } from "@/components/watchlist/diff-panel";
 import DigestView from "@/components/digest/digest-view";
+import GlassCard from "@/components/ui/glass-card";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +20,9 @@ export default async function DashboardPage() {
 
   if (error) {
     return (
-      <p className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+      <GlassCard className="border-down/20 px-4 py-3 text-sm text-down">
         Couldn&apos;t load your digest. Refresh to try again.
-      </p>
+      </GlassCard>
     );
   }
 
@@ -32,15 +33,15 @@ export default async function DashboardPage() {
 
   if (items.length === 0) {
     return (
-      <div className="rounded border border-dashed border-gray-300 p-8 text-center">
-        <p className="text-sm font-medium text-gray-700">Nothing on your watchlist yet</p>
-        <p className="mt-1 text-sm text-gray-500">
-          <Link href="/watchlist" className="underline">
+      <GlassCard className="border-dashed p-10 text-center">
+        <p className="text-sm font-medium text-white/80">Nothing on your watchlist yet</p>
+        <p className="mt-1.5 text-sm text-white/45">
+          <Link href="/watchlist" className="text-pulse underline decoration-pulse/40 underline-offset-4 hover:text-pulse-soft">
             Add your first stock
           </Link>{" "}
           to start seeing your digest here.
         </p>
-      </div>
+      </GlassCard>
     );
   }
 
@@ -50,7 +51,7 @@ export default async function DashboardPage() {
         <DigestView items={items} />
       </WatchlistDiffsProvider>
       <p className="text-sm">
-        <Link href="/watchlist" className="text-gray-600 underline hover:text-gray-900">
+        <Link href="/watchlist" className="text-white/45 underline decoration-white/20 underline-offset-4 hover:text-white/80">
           View full watchlist
         </Link>
       </p>

@@ -111,9 +111,9 @@ export function useWatchlistDiffs(): DiffsState {
 }
 
 const BUCKET_COLOR: Record<Bucket, string> = {
-  Urgent: "text-red-600",
-  Notable: "text-amber-600",
-  Routine: "text-gray-500",
+  Urgent: "text-down",
+  Notable: "text-warn",
+  Routine: "text-white/40",
 };
 
 /** Renders one symbol's raw diff line plus its Phase 5 score/bucket, as plain text. */
@@ -121,7 +121,7 @@ export function DiffLine({ symbol }: { symbol: string }) {
   const { diffs, loading } = useContext(DiffsContext);
 
   if (loading) {
-    return <span className="text-xs text-gray-400">Checking for changes…</span>;
+    return <span className="text-xs text-white/35">Checking for changes…</span>;
   }
   if (!diffs) return null;
 
@@ -129,18 +129,18 @@ export function DiffLine({ symbol }: { symbol: string }) {
   if (!diff) return null;
 
   if (diff.isFirstView) {
-    return <span className="text-xs text-gray-400">First time viewing</span>;
+    return <span className="text-xs text-white/35">First time viewing</span>;
   }
 
   const pct = diff.priceDeltaPct;
   const pctColor =
     pct === null
-      ? "text-gray-400"
+      ? "text-white/35"
       : pct > 0
-        ? "text-green-600"
+        ? "text-up"
         : pct < 0
-          ? "text-red-600"
-          : "text-gray-500";
+          ? "text-down"
+          : "text-white/50";
   const pctLabel =
     pct === null
       ? "no change"

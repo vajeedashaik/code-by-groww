@@ -29,6 +29,18 @@ export interface DailyBar {
   volume: number | null;
 }
 
+/** One trading day's full OHLC bar, for candlestick chart rendering only — not persisted, not used by scoring. */
+export interface OhlcBar {
+  symbol: string;
+  /** ISO calendar date, "YYYY-MM-DD". */
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number | null;
+}
+
 export type MarketDataErrorCode =
   | "NOT_FOUND" // symbol unknown to the source / no price data
   | "TIMEOUT" // the source did not answer within the budget

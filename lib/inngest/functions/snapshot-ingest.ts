@@ -3,6 +3,7 @@ import { inngest } from "@/lib/inngest/client";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getAllQuotes, MarketDataError } from "@/lib/market-data";
 import { classifyStaleness } from "@/lib/market-data/staleness";
+import { reconcileQuotes } from "@/lib/market-data/reconcile";
 import { chunk, loadWatchlistSymbols } from "@/lib/inngest/functions/shared";
 
 /**
@@ -21,6 +22,13 @@ import { chunk, loadWatchlistSymbols } from "@/lib/inngest/functions/shared";
  * Polling interval: 5 minutes (see docs/superpowers/specs). Staleness bands in
  * lib/market-data/staleness.ts assume this cadence.
  *
+ * Phase 8: when a symbol gets more than one quote in the same run (currently
+ * only US symbols, where both yahoo and finnhub answer), lib/market-data/
+ * reconcile.ts's documented policy picks a "chosen" quote. Every quote is
+ * still inserted as its own row (nothing is dropped), but the chosen row also
+ * carries `conflict`/`alt_source`/`alt_price`/`alt_fetched_at` when the two
+ * sources genuinely disagreed — queryable and demoable, not just logged.
+ *
  * inngest@4 note: createFunction takes (options, handler); the trigger list
  * lives in options.triggers (the older third-positional-arg form is gone).
  */
@@ -34,6 +42,10 @@ interface InsertRow {
   source: string;
   status: "FRESH";
   fetched_at: string;
+  conflict: boolean;
+  alt_source: string | null;
+  alt_price: number | null;
+  alt_fetched_at: string | null;
 }
 
 interface Failure {
@@ -82,7 +94,14 @@ export const snapshotIngest = inngest.createFunction(
             chunks[i].map(async (symbol) => {
               try {
                 const { quotes, errors } = await getAllQuotes(symbol);
+
+                const reconciled = quotes.length > 1 ? reconcileQuotes(quotes) : null;
+                if (reconciled?.conflict) {
+                  console.warn(`[snapshot-ingest] conflict for ${symbol}: ${reconciled.reason}`);
+                }
+
                 for (const q of quotes) {
+                  const isChosen = reconciled !== null && q === reconciled.chosen;
                   rowsOut.push({
                     symbol: q.symbol,
                     price: q.price,
@@ -90,6 +109,13 @@ export const snapshotIngest = inngest.createFunction(
                     source: q.source,
                     status: "FRESH",
                     fetched_at: nowIso,
+                    conflict: isChosen && reconciled!.conflict,
+                    alt_source: isChosen && reconciled!.conflict ? reconciled!.alternate!.source : null,
+                    alt_price: isChosen && reconciled!.conflict ? reconciled!.alternate!.price : null,
+                    alt_fetched_at:
+                      isChosen && reconciled!.conflict
+                        ? reconciled!.alternate!.fetchedAt.toISOString()
+                        : null,
                   });
                 }
                 for (const err of errors) {

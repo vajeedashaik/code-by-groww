@@ -60,8 +60,15 @@ export async function GET(request: Request) {
   let finnhubResults: StockSearchResult[] = [];
   try {
     const res = await fetch(
-      `${FINNHUB_SEARCH}?q=${encodeURIComponent(query)}&token=${apiKey}`,
-      { signal: AbortSignal.timeout(6000), cache: "no-store" },
+      `${FINNHUB_SEARCH}?q=${encodeURIComponent(query)}`,
+      {
+        // Header, not query string — keeps the key out of any logged
+        // request URL (phase8.md task 4 audit: matches the pattern already
+        // used in lib/market-data/sources/finnhub.ts and lib/news/finnhub-news.ts).
+        headers: { "X-Finnhub-Token": apiKey },
+        signal: AbortSignal.timeout(6000),
+        cache: "no-store",
+      },
     );
 
     if (!res.ok) {

@@ -132,6 +132,50 @@ assert(
   "computeSectorBenchmarkPct averages member moves",
 );
 
+// --- Phase 8: stale snapshot forces confidence to Low, regardless of otherwise-complete data ---
+const baseInput: MeaningfulnessInput = {
+  priceDeltaPct: 4,
+  volumeNow: 500_000,
+  volumeAvgRecent: 500_000,
+  dailyVolPct: 2,
+  marketDeltaPct: 1,
+  sectorDeltaPct: 1,
+  sectorName: "Energy",
+};
+const resultFresh = computeMeaningfulness(baseInput);
+assert(resultFresh.confidence === "High", "sanity check: fully complete data scores High confidence when not stale");
+const resultStale = computeMeaningfulness({ ...baseInput, isStale: true });
+assert(resultStale.confidence === "Low", "isStale:true forces confidence to Low even with otherwise-complete data");
+assert(resultStale.explanation.stale === true, "explanation.stale reflects the isStale input");
+assert(resultFresh.explanation.stale === false, "explanation.stale defaults to false when isStale is omitted");
+assert(
+  resultStale.score === resultFresh.score,
+  "staleness affects confidence only, never the score itself (the math is unchanged)",
+);
+
+// --- Phase 8: conflict fields pass through to the explanation only when conflict is true ---
+const resultConflict = computeMeaningfulness({
+  ...baseInput,
+  conflict: true,
+  altSource: "finnhub",
+  altPrice: 123.45,
+});
+assert(resultConflict.explanation.conflict === true, "conflict:true is reflected in the explanation");
+assert(resultConflict.explanation.alt_source === "finnhub", "alt_source passes through when conflict is true");
+assert(resultConflict.explanation.alt_price === 123.45, "alt_price passes through when conflict is true");
+const resultNoConflict = computeMeaningfulness(baseInput);
+assert(resultNoConflict.explanation.conflict === false, "conflict defaults to false when omitted");
+assert(resultNoConflict.explanation.alt_source === null, "alt_source is null when there is no conflict");
+const resultAltIgnoredWithoutConflict = computeMeaningfulness({
+  ...baseInput,
+  altSource: "finnhub",
+  altPrice: 999,
+});
+assert(
+  resultAltIgnoredWithoutConflict.explanation.alt_source === null,
+  "alt_source/alt_price are only surfaced when conflict is actually true, even if passed",
+);
+
 if (failures > 0) {
   console.error(`\n${failures} check(s) failed.`);
   process.exit(1);

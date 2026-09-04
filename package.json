@@ -11,15 +11,21 @@
     "inngest": "inngest-cli dev",
     "verify:scoring": "tsx scripts/verify-scoring.ts",
     "verify:digest": "tsx scripts/verify-digest.ts",
-    "verify:thesis": "tsx scripts/verify-thesis.ts"
+    "verify:thesis": "tsx scripts/verify-thesis.ts",
+    "verify:reconcile": "tsx scripts/verify-reconcile.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.9.6",
     "@supabase/supabase-js": "^2.47.10",
+    "clsx": "^2.1.1",
     "inngest": "^4.19.0",
+    "lightweight-charts": "^5.2.1",
+    "motion": "^13.2.0",
     "next": "^15.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "resend": "^6.26.0",
+    "tailwind-merge": "^3.6.0",
     "yahoo-finance2": "^4.0.2"
   },
   "devDependencies": {

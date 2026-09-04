@@ -3,6 +3,7 @@ import { inngest } from "@/lib/inngest/client";
 import { snapshotIngest } from "@/lib/inngest/functions/snapshot-ingest";
 import { dailyHistoryBackfill } from "@/lib/inngest/functions/daily-history-backfill";
 import { thesisRelevance } from "@/lib/inngest/functions/thesis-relevance";
+import { alertCheck } from "@/lib/inngest/functions/alert-check";
 
 /**
  * Inngest's HTTP entrypoint. The dev server (`npm run inngest`) and Inngest
@@ -12,5 +13,5 @@ import { thesisRelevance } from "@/lib/inngest/functions/thesis-relevance";
  */
 export const { GET, POST, PUT } = serve({
   client: inngest,
-  functions: [snapshotIngest, dailyHistoryBackfill, thesisRelevance],
+  functions: [snapshotIngest, dailyHistoryBackfill, thesisRelevance, alertCheck],
 });

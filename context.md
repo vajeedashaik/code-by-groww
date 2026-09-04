@@ -10,7 +10,171 @@ Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
 
 **Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4
 Seen-State/Diffing → 5 Meaningfulness Engine → 6 Digest UI → 7 Thesis + AI
-Relevance → 8–9 (resilience/staleness, …).
+Relevance → 8 Staleness/Conflict Handling + Time Machine → 9 Polish + Demo
+Prep.
+
+## Current state — Phase 9: Polish + Demo Prep (CODE-LEVEL WORK DONE, pending browser/perf/rehearsal — the last phase)
+
+No new product logic, per phase9.md's own rule. Built directly against
+phase9.md (same approach as every phase since 6: fully-specified spec, no
+subagent-driven-development dispatch needed). Deploy explicitly skipped —
+user chose local-demo-only for this hackathon, so phase9.md task 7 is N/A.
+The user chose to have code-level regression/polish/crash-safety done now,
+with a checklist handed back for everything that genuinely requires a
+browser + live Clerk/Supabase session (every phase's own precedent).
+
+### What was done (Phase 9)
+
+| Area | What |
+| --- | --- |
+| Regression baseline | `npm run typecheck`, `npm run build` (11→10 routes after `/debug` removal), and all four `verify:*` scripts (scoring/digest/thesis/reconcile) re-run clean — no regression from Phase 8's uncommitted work |
+| Static regression audit | Re-read Phase 4's race-condition code (`markWatchlistSeen`, `diff-panel.tsx`'s poll-merge) and Phase 1's RLS policies (`supabase/schema.sql`) — both intact, matching their documented Phase 4/7/8 fixes exactly; no drift found. `lib/scoring/compute-for-diffs.ts` re-checked for N+1: history is one batched `loadRecentHistory` call, sector benchmarks are computed from that in-memory map (loop over ~6 sectors, no query inside), confirming the "single batched call" claim for task 3 still holds at the code level |
+| **Removed `/debug` page** | `app/(protected)/debug/page.tsx` — a Phase 1 sanity-check page whose own comment said "removed in a later phase" but never was. It inserted+deleted a live `TEST` row into `watchlist_items` on every load and dumped raw JSON — a genuine crash-safety/polish risk for a judge poking at protected URLs (task 4), not a new-feature removal. Dropped from `middleware.ts`'s route matcher too |
+| Error boundaries | `app/error.tsx` (route-level, keeps header/nav mounted) + `app/global-error.tsx` (root-layout-level fallback) — **none existed before Phase 9**, a real task-4 gap, not just verification |
+| Loading states | `app/(protected)/dashboard/loading.tsx`, `app/(protected)/watchlist/loading.tsx` — previously blank during the server-side `watchlist_items` fetch on first navigation; now a plain muted line, matching the existing client-side "Checking for changes…" pattern already used inside `WatchlistDiffsProvider` |
+| Color-system fix | `components/digest/routine-line.tsx` — muted the price delta to gray-scale instead of full-saturation green/red, closing the exact risk Phase 6's own manual-step review flagged ("Routine rows... still get full-saturation green/red... recreating the anxiety-inducing ticker") and never acted on until now |
+| Landing page | `app/page.tsx` rewritten — was still the literal Phase 1 placeholder ("Phase 1 foundation. Authentication and database schema only..."), the worst possible first impression for a judge. Now states the product + core insight (memory/attention, not another dashboard) in the first two sentences, with a real CTA. `app/layout.tsx`'s `<meta description>` fixed for the same reason |
+| README | Rewritten judge-facing per task 5 — leads with what/why, a "Key decisions" section answering the design doc's Judge-Facing Engineering Story questions (architecture, algorithm, staleness/conflicts, sector-mapping trade-off, why-AI-only-for-thesis) with real shipped numbers, trimmed the old phase-by-phase acceptance-test dump (redundant with `context.md`/`phaseN.md`, and the phase9.md instruction is explicit that this should NOT be the internal design doc) |
+| Demo script | New `DEMO_SCRIPT.md` — the problem → user leaves → the return → explain one change → thesis → reliability → closing line (task 6's own structure), with a timing budget (~4m15s core path) and 1-2-sentence answers to the likely hard questions (task 6 + manual step 2) |
+
+### Crash-safety sweep (task 4) — findings
+
+- **Direct nav to a protected URL while signed out**: already correct — `middleware.ts` gates `/dashboard(.*)` and `/watchlist(.*)`, `(protected)/layout.tsx` re-checks via `auth.protect()` (defense in depth). No change needed.
+- **Adding a stock twice quickly**: already correct — `unique(user_id, symbol)` DB constraint, `addWatchlistItem` maps Postgres `23505` to a friendly "already in your watchlist" message; the Add button also disables while `pending` (`useTransition`).
+- **Removing a stock while its digest card is expanded**: not actually reachable as literally stated — `RemoveStockButton` only exists on `/watchlist`, not on `/dashboard`'s `StockCard`. On `/watchlist` itself, removing an item just unmounts its `<li>` (and any open `<details>` inside it) via React's normal reconciliation after `revalidatePath` — no dangling state, no crash.
+- **Back/forward browser nav mid-flow**: both protected pages are `force-dynamic` Server Components with no client-side router state to desync; nothing found.
+- **No top-level error boundary existed at all** — genuine gap, fixed (see table above).
+
+### Manual checklist handed back to the user (cannot be done headlessly — no browser tool, no live Clerk/Supabase session, no deploy credentials)
+
+1. **Full regression browser walk** — re-run Phase 1-8's TESTING checklists (full lists in each `phaseN.md`; outstanding items already tracked per-phase above in this file) against the current build. Prioritize, per phase9.md's own emphasis: Phase 1's RLS cross-user test (two real accounts, confirm User B never sees User A's `watchlist_items`) and Phase 4's rapid-refresh/race test (trigger the snapshot job via the Inngest dashboard while `/watchlist` is open, per Phase 4's documented race-condition policy).
+2. **30-50 stock performance test (task 3)** — build a real watchlist at that scale, load `/dashboard`, and record real numbers: digest load time, whether `GET /api/watchlist/diffs` shows as one request in the Network tab (not N+1 — code-level batching already reconfirmed above), and whether the 5-minute snapshot cron keeps up without falling behind/hitting Finnhub's free-tier rate limit. If it can't keep up, that's a real "next steps at scale" talking point, not something to silently ignore.
+3. **Cold-start test** — close the browser fully, clear session, sign in fresh, walk the whole demo flow.
+4. **Demo rehearsal** — `DEMO_SCRIPT.md`, out loud, twice, timed, ideally in front of someone (phase9.md manual step 1).
+5. **Screenshots/recording** of a clean working run as an offline fallback (manual step 4).
+6. **Re-read the original design doc's sections 34-39** before presenting (manual step 5) — that doc isn't in this repo, so this is purely a "you, not the AI" step.
+7. Deploy — explicitly skipped this phase per user's choice; task 7 and its regression re-run are N/A unless that changes before submission.
+
+### Phase 9 deviations from spec
+
+1. **Deploy (task 7) skipped entirely** — user's explicit choice (local demo only), not a judgment call made unilaterally.
+2. **README's old phase-by-phase acceptance-test tables were cut**, not merged in — phase9.md task 5 explicitly distinguishes "judge-facing summary" from "the full internal design doc"; that history already lives in `context.md` and the individual `phaseN.md` files, so duplicating it in the judge-facing README would bury the insight the task explicitly warns against burying.
+3. **No live performance numbers recorded** — task 3's real load-time/rate-limit numbers require a live 30-50-stock account, which isn't something this session can produce headlessly; handed back as manual checklist item 2 above rather than fabricated.
+4. **Executed directly on `master`**, same as every prior phase.
+
+## Current state — Phase 8: Staleness, Dual-Source Conflicts, Market Time Machine (BUILT, pending browser/manual verification)
+
+Makes the system's honesty about data quality visible (the brief's explicit
+"how do you handle stale, delayed or conflicting data" requirement) and adds
+real dual-source conflict handling — not just a design-doc claim. Built
+directly against the fully-specified `phase8.md` (same approach as Phase 7:
+the spec already contained unambiguous requirements for all 5 tasks, so
+tasks were implemented directly and verified incrementally —
+`typecheck`/`build`/all four `verify:*` scripts — rather than per-task
+subagent dispatch), with a `superpowers:code-reviewer` pass against the whole
+diff before declaring it done (see below).
+
+### What is built (Phase 8)
+
+| Area | Files |
+| --- | --- |
+| Staleness badge | `components/watchlist/staleness-badge.tsx` — renders Phase 3's `classifyStaleness` next to a price; FRESH/DELAYED both render as a neutral muted "updated Xm ago", only STALE gets a visually distinct (still calm-toned) badge. No `"use client"` — pure, renders from server (`PriceCell`) or client (`StockCard`) components alike |
+| Staleness → confidence | `lib/scoring/score.ts`'s `MeaningfulnessInput` gains optional `isStale`/`conflict`/`altSource`/`altPrice`; `isStale: true` forces `confidence` to `"Low"` regardless of data completeness (score itself is untouched — staleness affects trust in the number, not the number); `Explanation` gains `stale`/`conflict`/`alt_source`/`alt_price` so these are persisted, not just displayed live |
+| Reconciliation policy | `lib/market-data/reconcile.ts` — `reconcileQuotes()`, pure: prefer the more recent reading if fetch times differ by >60s (`RECONCILE_TOLERANCE_MS`); otherwise, if prices disagree by >0.1% (`CONFLICT_THRESHOLD_PCT`), it's a genuine conflict — both values kept, tie-break is source priority (yahoo, then finnhub) |
+| Reconciliation wiring | `lib/inngest/functions/snapshot-ingest.ts` — runs `reconcileQuotes()` whenever a symbol's `getAllQuotes()` returns more than one quote in the same run (US symbols only, since Finnhub's free tier doesn't quote NSE stocks); every quote is still inserted as its own row (nothing dropped), but the chosen row also carries `conflict`/`alt_source`/`alt_price`/`alt_fetched_at` when the two disagreed |
+| Migration | `supabase/migrations/0005_market_snapshot_conflict.sql` — adds those 4 columns to `market_snapshots` (idempotent `add column if not exists`); `types/database.ts` and `supabase/schema.sql` updated to match |
+| Diff/scoring plumbing | `lib/watchlist/diff.ts`'s `SymbolDiff` gains `currentSnapshotFetchedAt`, `conflict`, `altSource`, `altPrice`, `usedSource` (all sourced from the already-fetched "now" `market_snapshots` row — no new query); `lib/scoring/compute-for-diffs.ts` derives `isStale` via `classifyStaleness(diff.currentSnapshotFetchedAt)` and passes it plus the conflict fields into `computeMeaningfulness` — frozen into the `change_events` row at first-scoring time, same immutability principle as Phase 7's score/bucket fix |
+| Conflict visibility | `components/digest/why-flagged-detail.tsx` — a "Data conflict" block (shown only when `explanation.conflict`) naming both source values, which one was used, and the documented tie-break reason; takes `currentPrice`/`usedSource` as props from the caller rather than duplicating price data into `Explanation` |
+| Market Time Machine | `lib/digest/time-machine.ts` — pure `buildTimeMachineSummary()`; `components/watchlist/time-machine.tsx` — a per-row `<details>` toggle on `/watchlist` reading the already-fetched `useWatchlistDiffs()` context (no new fetch), rendering a before/after table (price, volume, sector move, market move) + one-line summary; a first-view stock (no prior seen-state) renders a plain "nothing to compare yet" message instead of an empty/broken table |
+| API failure-handling fixes | `app/api/watchlist/diffs/route.ts` — `inngest.send()` calls are now individually try/caught (an unreachable Inngest event bus used to 500 the *entire* diffs response, taking down price/score display over an unrelated AI-trigger failure); `app/api/search/route.ts` — Finnhub API key moved from query string to the `X-Finnhub-Token` header, matching every other Finnhub call site |
+| Verification scripts | `scripts/verify-reconcile.ts` (`npm run verify:reconcile`, new) — 15 checks on the reconciliation policy (single-source, agreement, conflict, order-independence, recency-outside-tolerance); `scripts/verify-scoring.ts` and `scripts/verify-digest.ts` extended with staleness/conflict/Time-Machine checks (both re-run as regression checks too) |
+
+### Failure-handling audit (task 4) — what was checked, what was found
+
+Walked every external call site: Yahoo quote/history (`lib/market-data/sources/yahoo.ts`, 8s timeout), Finnhub quote (`lib/market-data/sources/finnhub.ts`, 6s timeout), Finnhub search (`app/api/search/route.ts`, 6s timeout), Finnhub news (`lib/news/finnhub-news.ts`, 6s timeout), Gemini (`lib/inngest/functions/thesis-relevance.ts` via `step.ai.infer`). All five already had a caught, non-fatal failure path from earlier phases (most of this task was verification, exactly as phase8.md predicted) — a broken/missing Finnhub key degrades to the NSE-fallback search list with a visible `error` flag, a broken Gemini key degrades to a stored `"unavailable"` thesis verdict without affecting price/score display at all, and both Inngest jobs' per-symbol try/catch means one bad symbol never aborts a run.
+
+Two real, fixed gaps:
+1. `GET /api/watchlist/diffs`'s `inngest.send()` calls for thesis-check triggers were **not** wrapped in try/catch — an unreachable Inngest dev server/Cloud would reject the whole `Promise.all` and 500 the entire route, breaking the digest AND the raw watchlist table (both read this endpoint) even though the price/score computation above it had already succeeded. Fixed: each send is now isolated, logs and continues on failure.
+2. `/api/search` sent the Finnhub API key as a `?token=` query parameter — every other Finnhub call site in the codebase (quote, news) deliberately uses the `X-Finnhub-Token` header specifically to keep the key out of logged request URLs. Fixed for consistency.
+
+One deliberate non-fix, documented rather than patched: `step.ai.infer`'s Gemini call has no explicit manual timeout wrapper (unlike the raw `fetch()` calls elsewhere). Inngest steps have their own platform-level execution timeout, and a step that never resolves is Inngest's responsibility to fail/retry, which then surfaces through the same try/catch that already degrades to `"unavailable"` — adding a redundant `Promise.race` timeout around an Inngest-managed step isn't a proven gap, just an untested edge case; flagged here rather than "fixed" with an unverified wrapper.
+
+### Reconciliation tie-break policy, precisely (manual step 3's answer)
+
+**Prefer the more recent reading if the two sources' fetch times differ by
+more than 60 seconds (`RECONCILE_TOLERANCE_MS`) — not a conflict, just
+picking the fresher number.** Otherwise (the normal case, since both sources
+are fetched back-to-back in the same snapshot-job run), if the two prices
+disagree by more than 0.1% (`CONFLICT_THRESHOLD_PCT`), it's a genuine
+conflict: both values are kept (every quote is inserted as its own row) and
+the tie-break is a fixed source-priority order — **yahoo first, then
+finnhub** — because yahoo is already this system's primary source everywhere
+else (free, unlimited, covers every symbol including NSE), so finnhub's role
+is a cross-check, not a co-equal vote. Never averaged, never hidden — the
+conflict is recorded on the chosen row (`conflict: true`,
+`alt_source`/`alt_price` set to finnhub's disagreeing value) so it is
+queryable straight from `market_snapshots` and visible in the "why is this
+flagged?" detail view.
+
+**One-sentence pitch answer:** *when two sources disagree on price by more
+than 0.1% at roughly the same moment, we don't average or hide it — we keep
+Yahoo's price (documented priority: free, unlimited, covers every symbol we
+track) and show Finnhub's disagreeing value alongside it as a flagged
+conflict.*
+
+### Scope note: which symbols can actually show a conflict
+
+Finnhub's free tier only quotes non-NSE symbols (`lib/market-data/sources/finnhub.ts`'s `supports()` excludes `.NS`/`.BO`), so dual-source data — and therefore conflict detection — only exists for US-listed symbols in the watchlist. This matches phase8.md's own scope ("at least the subset of symbols where you have both a Yahoo Finance and Finnhub quote available"), and is why phase8.md's manual steps call for adding a US symbol (e.g. `AAPL`) to the demo watchlist and temporarily hardcoding a price discrepancy to exercise the conflict path — real-world Yahoo/Finnhub prices rarely disagree meaningfully within one 5-minute cycle.
+
+### Phase 8 code review
+
+A `superpowers:code-reviewer` pass against the whole diff, with explicit
+instructions to focus on the project's own known failure class (Phase 7's
+"never recompute an already-scored row" bug) plus the reference-equality
+check used to identify the "chosen" quote in `snapshot-ingest.ts`. Result:
+**everything checked held up correctly** — the `q === reconciled.chosen`
+check is sound (reconcileQuotes returns the actual array element, not a
+copy), the Phase 7 immutability rule is respected (staleness/conflict are
+only ever computed in the first-scoring branch, never the reuse branch),
+`diff.ts`'s new fields are populated from the correct ("now", not "then")
+row in both branches, and the conflict UI can't render with undefined data
+(it's gated behind `explanation && confidence`, which only exist for scored
+diffs). One Minor, honest finding, fixed immediately: the reconciliation
+policy's first tier ("prefer the more recent timestamp") is unreachable in
+production, since both sources are fetched concurrently within the same job
+run (well under the 60s tolerance) — not a bug, but worth documenting
+explicitly rather than leaving silently dead. Fixed by expanding the comment
+in `lib/market-data/reconcile.ts` to say so plainly, so a demo/judge question
+about that tier has an honest answer instead of an implied claim it fires
+regularly.
+
+### Phase 8 verification
+
+- `npm run typecheck` — exit 0, no output.
+- `npm run build` — compiled successfully in 51s, 11 routes + middleware, 0 errors.
+- `npm run verify:reconcile` (new) — all 15 checks pass.
+- `npm run verify:scoring` — 24 checks pass (13 original + 11 new staleness/conflict checks).
+- `npm run verify:digest` — 22 checks pass (16 original + 6 new Time Machine checks).
+- `npm run verify:thesis` — regression check, all 21 checks still pass (the shared `Explanation` fixture needed the 4 new required fields added, no behavioral change).
+- **Browser/manual tests — not yet run.** ALL 7 of phase8.md's TESTING items and its 4 MANUAL STEPS need a real Clerk session, a running Inngest dev server, and (test 3) deliberately introducing a temporary price discrepancy between sources — none of this is doable headlessly. This is the user's job, same as every prior phase. In particular, test 3 (the conflict path) requires manually editing `lib/market-data/sources/finnhub.ts` or `yahoo.ts` to return a different test price temporarily, and test 4 requires deliberately breaking each API key one at a time.
+
+### Phase 8 manual steps outstanding (from phase8.md's "MANUAL STEPS")
+
+- [ ] Manually introduce a temporary price discrepancy between Yahoo and Finnhub for one US symbol (e.g. `AAPL`) to exercise the conflict-detection path end to end, then remove it and confirm normal operation resumes.
+- [ ] Review the staleness badge copy and conflict explanation copy for tone — adjust wording if the shipped defaults ("Price may be a little out of date…", the Data conflict paragraph) don't read as calm/trustworthy enough for a fintech-adjacent product.
+- [x] Tie-break rule decided and documented above, with the one-sentence pitch answer ready.
+- [ ] Spend a few minutes actually using the Market Time Machine view on real data — judge whether the before/after framing feels genuinely useful or decorative, adjust if the latter.
+
+### Phase 8 deviations from spec
+
+1. **Conflict data added directly to `market_snapshots`** (4 new columns), not a separate related table — phase8.md explicitly offered either; a separate table would need its own join for every read path (diff computation, Time Machine) for no query-simplicity gain at this scale.
+2. **Staleness/conflict are frozen into `change_events` at first-scoring time**, not re-evaluated live on every poll — a deliberate consistency choice with Phase 7's critical fix (a change_events row, once scored, is never recomputed), not an oversight. The live staleness *badge* (price display) is always current; only the historical *confidence* field is frozen.
+3. **`WhyFlaggedDetail` takes `currentPrice`/`usedSource` as new props** rather than adding the current price into `Explanation` — the caller (`StockCard`) already has `diff.priceNow` in scope, so duplicating it into the persisted explanation JSON would be redundant storage for a value that's only needed for one detail-view sentence.
+4. **Market Time Machine lives only on `/watchlist`**, not also duplicated into the digest — phase8.md allowed either placement ("part of the why-flagged detail view, or a small dedicated section"); `/watchlist` was chosen specifically because it lists every item regardless of bucket, so first-view/newly-added stocks (test 6) are reachable through the same UI as everything else, rather than needing a second location for that case.
+5. **No new API route** — Time Machine reuses the already-fetched `WatchlistDiffsProvider` context client-side; no new endpoint, no new Supabase query.
+6. **Two audit fixes went slightly beyond "surface what already exists"**: `inngest.send()` try/catch and the search route's header-vs-query-string key fix are genuine code changes, not just visibility/UI work — justified as directly responsive to task 4's explicit "fixing any gaps you find" instruction.
+7. **No test runner** — same Phase 2-7 deviation; verification is `tsc`/`build`/four `verify:*` scripts.
+8. **Executed directly on `master`**, same as every prior phase — established project convention, not re-confirmed from scratch this time either.
 
 ## Current state — Phase 7: Personal Thesis + AI Relevance Check (BUILT, pending browser/manual verification)
 
@@ -943,7 +1107,7 @@ section above for what each does; full messages via
 ## How to continue
 
 - Local run: fill `.env.local` (now incl. `FINNHUB_API_KEY`), run migrations
-  `0001`→`0004`, `npm install`, `npm run dev` + `npm run inngest`, open
+  `0001`→`0005`, `npm install`, `npm run dev` + `npm run inngest`, open
   `http://localhost:3000`.
 - Phase 3 built, compiling, and backend-smoke-tested (see the Phase 3 section
   above). Run the README "Phase 3 acceptance tests" in a browser — especially
@@ -980,5 +1144,20 @@ section above for what each does; full messages via
   thesis-bearing stock, and Inngest-dashboard log inspection for tests 2
   and 9) and its 4 manual steps (confirming the Gemini key works,
   iterating on the actual prompt wording, watching API quota, finalizing
-  the "why AI here" pitch answer) before starting Phase 8 (Resilience —
-  staleness, conflicting sources, confidence).
+  the "why AI here" pitch answer).
+- Phase 8 built, typechecking, building, and verified via all four
+  `verify:*` scripts + a clean `superpowers:code-reviewer` pass (see the
+  Phase 8 section above) — staleness badges on both `/dashboard` and
+  `/watchlist`, dual-source reconciliation wired into `snapshot-ingest.ts`
+  (new migration `0005`), conflict visibility in the "why is this flagged?"
+  detail view, two real API-failure-handling gaps found and fixed, and a
+  Market Time Machine toggle on `/watchlist`. **Not yet committed** — still
+  sitting as uncommitted working-tree changes (`git status --short`) as of
+  this write-up. Run ALL 7 of phase8.md's TESTING items in a browser
+  (needs a real Clerk session, a running Inngest dev server, and — for
+  test 3 — deliberately introducing a temporary price discrepancy between
+  Yahoo and Finnhub for a US-listed symbol like AAPL) and its 4 manual
+  steps (exercising the conflict path, reviewing badge/conflict copy tone,
+  confirming the tie-break policy — already documented above — and judging
+  whether the Time Machine view earns its place) before starting Phase 9
+  (Polish + Demo Prep, the last phase before submission).

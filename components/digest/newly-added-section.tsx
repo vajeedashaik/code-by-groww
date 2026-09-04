@@ -1,21 +1,23 @@
 import type { BucketedItem } from "@/lib/digest/summarize";
+import GlassCard from "@/components/ui/glass-card";
+import Badge from "@/components/ui/badge";
 
 /** Lightweight list of first-view symbols — nothing to score yet (phase6.md task 1). */
 export default function NewlyAddedSection({ items }: { items: BucketedItem[] }) {
   return (
-    <div className="space-y-2">
-      <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-500">
-        Newly added ({items.length})
+    <div className="space-y-3">
+      <h2 className="flex items-center gap-2 text-sm font-semibold tracking-wide text-white/45 uppercase">
+        Newly added <Badge>{items.length}</Badge>
       </h2>
-      <ul className="space-y-1">
+      <GlassCard className="divide-y divide-white/5 px-4">
         {items.map(({ item }) => (
-          <li key={item.symbol} className="flex items-baseline gap-2 text-sm">
-            <span className="font-medium">{item.symbol}</span>
-            {item.companyName && <span className="text-gray-500">{item.companyName}</span>}
-            <span className="text-xs text-gray-400">First time viewing</span>
-          </li>
+          <div key={item.symbol} className="flex items-baseline gap-2 py-2.5 text-sm">
+            <span className="font-medium text-white/85">{item.symbol}</span>
+            {item.companyName && <span className="truncate text-white/45">{item.companyName}</span>}
+            <span className="ml-auto shrink-0 text-xs text-white/30">First time viewing</span>
+          </div>
         ))}
-      </ul>
+      </GlassCard>
     </div>
   );
 }

@@ -1,27 +1,39 @@
 import Link from "next/link";
 import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/nextjs";
+import Logo from "@/components/ui/logo";
 
 export default function Header() {
   return (
-    <header className="border-b border-gray-200">
-      <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-3">
-        <Link href="/" className="font-semibold">
-          Smart Market Watchlist
+    <header className="sticky top-0 z-50 px-4 pt-4 sm:px-6">
+      <div className="glass mx-auto flex max-w-5xl items-center justify-between rounded-2xl px-4 py-2.5 sm:px-5">
+        <Link href="/" className="transition-opacity hover:opacity-80">
+          <Logo />
         </Link>
-        <nav className="flex items-center gap-4 text-sm">
+        <nav className="flex items-center gap-5 text-sm">
           <SignedIn>
-            <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
+            <Link
+              href="/dashboard"
+              className="group relative text-white/70 transition-colors hover:text-white"
+            >
               Dashboard
+              <span className="absolute -bottom-1 left-0 h-px w-0 bg-pulse transition-all duration-300 group-hover:w-full" />
             </Link>
-            <Link href="/watchlist" className="text-gray-600 hover:text-gray-900">
+            <Link
+              href="/watchlist"
+              className="group relative text-white/70 transition-colors hover:text-white"
+            >
               Watchlist
+              <span className="absolute -bottom-1 left-0 h-px w-0 bg-pulse transition-all duration-300 group-hover:w-full" />
             </Link>
-            {/* user menu placeholder — sign-out lives here */}
-            <UserButton />
+            <UserButton
+              appearance={{
+                elements: { avatarBox: "h-8 w-8 rounded-full ring-1 ring-white/15" },
+              }}
+            />
           </SignedIn>
           <SignedOut>
             <SignInButton mode="modal">
-              <button className="rounded bg-gray-900 px-3 py-1.5 text-white">
+              <button className="clay-pulse rounded-full px-4 py-1.5 text-sm font-semibold text-black transition-transform hover:scale-[1.03] active:scale-[0.98]">
                 Sign in
               </button>
             </SignInButton>

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/types/database";
 import type { SymbolDiff } from "@/lib/watchlist/diff";
+import { classifyStaleness } from "@/lib/market-data/staleness";
 import {
   MARKET_BENCHMARK_SYMBOL,
   lookupSector,
@@ -87,6 +88,13 @@ function extractThesisAnalysis(explanation: Json | null): ThesisAnalysisSummary 
  * a stock's detected change, once recorded, is immutable from this
  * function's point of view — exactly matching change_events' role as a
  * historical record.
+ *
+ * Phase 8: staleness/conflict are folded into the score at this same
+ * first-scoring moment and then frozen with everything else in the reused
+ * row — a snapshot that was STALE (or in conflict) when a change was first
+ * detected stays recorded that way, exactly like score/bucket/confidence
+ * already do, rather than having a later poll silently "heal" the confidence
+ * once a fresher snapshot arrives for a change that already happened.
  *
  * Note: if the change_events upsert fails, this still returns the in-memory
  * computed scores (logged, not thrown) — a caller should not assume a score
@@ -193,6 +201,12 @@ export async function computeAndPersistScores(
         marketDeltaPct,
         sectorDeltaPct,
         sectorName,
+        isStale: diff.currentSnapshotFetchedAt
+          ? classifyStaleness(diff.currentSnapshotFetchedAt) === "STALE"
+          : false,
+        conflict: diff.conflict,
+        altSource: diff.altSource,
+        altPrice: diff.altPrice,
       });
 
       results.set(diff.symbol, {

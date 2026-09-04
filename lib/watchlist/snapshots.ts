@@ -12,6 +12,10 @@ export interface LatestSnapshot {
   volume: number | null;
   source: string;
   fetched_at: string;
+  /** Phase 8 dual-source reconciliation fields — optional so callers that don't select them (e.g. markWatchlistSeen) still type-check. */
+  conflict?: boolean;
+  alt_source?: string | null;
+  alt_price?: number | null;
 }
 
 export function latestSnapshotWithIdBySymbol(

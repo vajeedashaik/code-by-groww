@@ -29,7 +29,7 @@ export default function EditThesis({
           setError(null);
           setEditing(true);
         }}
-        className="text-xs text-gray-400 hover:text-gray-700"
+        className="text-xs text-white/30 transition-colors hover:text-pulse"
       >
         Edit thesis
       </button>
@@ -37,12 +37,12 @@ export default function EditThesis({
   }
 
   return (
-    <div className="mt-1 space-y-1.5">
+    <div className="mt-1.5 space-y-2">
       <textarea
         rows={2}
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        className="w-full rounded border border-gray-300 px-2 py-1 text-sm outline-none focus:border-gray-500"
+        className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors focus:border-pulse/50"
       />
       <div className="flex items-center gap-2 text-xs">
         <button
@@ -58,7 +58,7 @@ export default function EditThesis({
               }
             })
           }
-          className="rounded bg-gray-900 px-2 py-0.5 text-white disabled:opacity-50"
+          className="clay-pulse rounded-full px-3 py-1 font-semibold text-black disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save"}
         </button>
@@ -66,11 +66,11 @@ export default function EditThesis({
           type="button"
           disabled={pending}
           onClick={() => setEditing(false)}
-          className="rounded border border-gray-300 px-2 py-0.5 text-gray-600"
+          className="rounded-full border border-white/15 px-3 py-1 text-white/60 hover:text-white"
         >
           Cancel
         </button>
-        {error && <span className="text-red-600">{error}</span>}
+        {error && <span className="text-down">{error}</span>}
       </div>
     </div>
   );

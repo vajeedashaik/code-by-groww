@@ -118,6 +118,10 @@ const sampleExplanation: Explanation = {
   sector_change_pct: 0.8,
   sector_used: "IT",
   data_completeness: "full",
+  stale: false,
+  conflict: false,
+  alt_source: null,
+  alt_price: null,
 };
 
 const promptWithNews = buildThesisPrompt(

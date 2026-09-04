@@ -1,7 +1,7 @@
 import "server-only";
 import { MarketDataError } from "@/lib/market-data/types";
-import type { DailyBar, MarketDataSource, Quote } from "@/lib/market-data/types";
-import { yahooSource } from "@/lib/market-data/sources/yahoo";
+import type { DailyBar, MarketDataSource, OhlcBar, Quote } from "@/lib/market-data/types";
+import { yahooSource, getCandles as yahooGetCandles } from "@/lib/market-data/sources/yahoo";
 import { finnhubSource } from "@/lib/market-data/sources/finnhub";
 
 /**
@@ -14,7 +14,7 @@ import { finnhubSource } from "@/lib/market-data/sources/finnhub";
  * genuine cross-source pair in market_snapshots.
  */
 
-export type { Quote, DailyBar } from "@/lib/market-data/types";
+export type { Quote, DailyBar, OhlcBar } from "@/lib/market-data/types";
 export { MarketDataError } from "@/lib/market-data/types";
 export type { MarketDataErrorCode } from "@/lib/market-data/types";
 
@@ -112,4 +112,14 @@ export async function getDailyHistory(
     }
   }
   throw firstError ?? noSourceError(symbol);
+}
+
+/**
+ * Full OHLC bars for candlestick chart rendering (see OhlcBar's doc — display
+ * only, not persisted, not part of scoring). Yahoo-only, same reasoning as
+ * `getDailyHistory`.
+ */
+export async function getCandles(symbol: string, days: number): Promise<OhlcBar[]> {
+  if (!yahooSource.supports(symbol)) throw noSourceError(symbol);
+  return yahooGetCandles(symbol, days);
 }

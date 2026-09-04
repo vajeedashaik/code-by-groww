@@ -26,7 +26,7 @@ export default function RemoveStockButton({
           setError(null);
           setConfirming(true);
         }}
-        className="text-xs text-gray-400 hover:text-red-600"
+        className="text-xs text-white/30 transition-colors hover:text-down"
       >
         Remove
       </button>
@@ -35,7 +35,7 @@ export default function RemoveStockButton({
 
   return (
     <span className="flex items-center gap-2 text-xs">
-      <span className="text-gray-600">Remove {symbol}?</span>
+      <span className="text-white/50">Remove {symbol}?</span>
       <button
         type="button"
         disabled={pending}
@@ -48,7 +48,7 @@ export default function RemoveStockButton({
             }
           })
         }
-        className="rounded bg-red-600 px-2 py-0.5 text-white disabled:opacity-50"
+        className="rounded-full bg-down px-2.5 py-1 text-white shadow-[0_6px_16px_-6px_rgba(255,92,92,0.6)] disabled:opacity-50"
       >
         {pending ? "Removing…" : "Confirm"}
       </button>
@@ -56,11 +56,11 @@ export default function RemoveStockButton({
         type="button"
         disabled={pending}
         onClick={() => setConfirming(false)}
-        className="rounded border border-gray-300 px-2 py-0.5 text-gray-600"
+        className="rounded-full border border-white/15 px-2.5 py-1 text-white/60 hover:text-white"
       >
         Cancel
       </button>
-      {error && <span className="text-red-600">{error}</span>}
+      {error && <span className="text-down">{error}</span>}
     </span>
   );
 }

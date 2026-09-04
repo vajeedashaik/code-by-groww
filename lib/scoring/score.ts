@@ -27,6 +27,12 @@ export interface Explanation {
   sector_change_pct: number | null;
   sector_used: string | null;
   data_completeness: DataCompleteness;
+  /** Phase 8: true when this diff's "now" snapshot was STALE at scoring time — confidence is forced to "Low" when true. */
+  stale: boolean;
+  /** Phase 8: true when the "now" snapshot's source disagreed with an alternate source beyond the documented threshold. */
+  conflict: boolean;
+  alt_source: string | null;
+  alt_price: number | null;
 }
 
 export interface MeaningfulnessInput {
@@ -40,6 +46,12 @@ export interface MeaningfulnessInput {
   /** Null when the symbol has no sector mapping, or the sector has no usable data. */
   sectorDeltaPct: number | null;
   sectorName: string | null;
+  /** Phase 8: true when the "now" snapshot classified as STALE at scoring time. Forces confidence to "Low" — stale data is never scored as if it were reliable. Defaults to false. */
+  isStale?: boolean;
+  /** Phase 8: true when the "now" snapshot's source disagreed with an alternate source beyond the documented threshold. Defaults to false. */
+  conflict?: boolean;
+  altSource?: string | null;
+  altPrice?: number | null;
 }
 
 export interface MeaningfulnessResult {
@@ -90,6 +102,10 @@ export function computeMeaningfulness(
     marketDeltaPct,
     sectorDeltaPct,
     sectorName,
+    isStale = false,
+    conflict = false,
+    altSource = null,
+    altPrice = null,
   } = input;
 
   if (!Number.isFinite(priceDeltaPct)) {
@@ -142,11 +158,16 @@ export function computeMeaningfulness(
   const bucket = deriveBucket(score);
 
   const hasVolume = volumeRatio !== null;
-  const confidence: Confidence = !volatilityAvailable
+  const confidenceFromCompleteness: Confidence = !volatilityAvailable
     ? "Low"
     : hasSector && hasVolume
       ? "High"
       : "Medium";
+  // Phase 8: a STALE "now" snapshot overrides everything else — a score
+  // computed from data that's already known to be old must never read as
+  // confidently as one computed from a fresh snapshot, regardless of how
+  // complete the other inputs (volatility/sector/volume) happen to be.
+  const confidence: Confidence = isStale ? "Low" : confidenceFromCompleteness;
 
   // Derived from the same three factors as `confidence` so the two can never
   // disagree (a prior version computed data_completeness from only
@@ -172,6 +193,10 @@ export function computeMeaningfulness(
       sector_change_pct: sectorDeltaPct,
       sector_used: hasSector ? sectorName : null,
       data_completeness: dataCompleteness,
+      stale: isStale,
+      conflict,
+      alt_source: conflict ? altSource : null,
+      alt_price: conflict ? altPrice : null,
     },
   };
 }

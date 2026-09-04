@@ -1,3 +1,5 @@
+import StalenessBadge from "@/components/watchlist/staleness-badge";
+
 /**
  * Renders a watchlist row's price. Server component, no client JS.
  *
@@ -5,7 +7,8 @@
  *   - price present, no usable prevClose -> just the price
  *   - no price -> muted "Fetching price…" (symbol added but the job hasn't run)
  *
- * Staleness is intentionally NOT shown here — that badge is Phase 8.
+ * Phase 8: also renders the staleness badge for `fetchedAt` next to the
+ * price — neutral for FRESH/DELAYED, a calm warm tone for STALE.
  */
 
 const inr = new Intl.NumberFormat("en-IN", {
@@ -27,13 +30,15 @@ export function percentChange(
 export default function PriceCell({
   price,
   prevClose,
+  fetchedAt,
 }: {
   price: number | null | undefined;
   prevClose: number | null | undefined;
+  fetchedAt?: string | null;
 }) {
   if (typeof price !== "number" || !Number.isFinite(price)) {
     return (
-      <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+      <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-0.5 text-xs text-white/45">
         Fetching price…
       </span>
     );
@@ -41,13 +46,7 @@ export default function PriceCell({
 
   const pct = percentChange(price, prevClose);
   const pctColor =
-    pct === null
-      ? "text-gray-400"
-      : pct > 0
-        ? "text-green-600"
-        : pct < 0
-          ? "text-red-600"
-          : "text-gray-500";
+    pct === null ? "text-white/35" : pct > 0 ? "text-up text-glow-up" : pct < 0 ? "text-down text-glow-down" : "text-white/50";
   const pctLabel =
     pct === null
       ? null
@@ -55,10 +54,13 @@ export default function PriceCell({
 
   return (
     <div className="text-right">
-      <div className="font-medium tabular-nums">{inr.format(price)}</div>
+      <div className="font-display font-medium tabular-nums text-white">{inr.format(price)}</div>
       {pctLabel && (
         <div className={`text-xs tabular-nums ${pctColor}`}>{pctLabel}</div>
       )}
+      <div className="mt-1">
+        <StalenessBadge fetchedAt={fetchedAt} />
+      </div>
     </div>
   );
 }

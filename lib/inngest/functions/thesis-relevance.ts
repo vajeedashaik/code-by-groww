@@ -8,7 +8,7 @@ import type { ThesisAnalysis } from "@/lib/thesis/types";
 import type { Explanation } from "@/lib/scoring/score";
 import type { Json } from "@/types/database";
 
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-flash-latest";
 const NEWS_DAYS = 5;
 const NEWS_MAX_ARTICLES = 5;
 

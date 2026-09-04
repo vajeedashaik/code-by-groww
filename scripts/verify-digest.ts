@@ -4,6 +4,7 @@
  */
 import { interpretExplanation } from "../lib/digest/interpret";
 import { bucketDiffs, summaryLine, type WatchlistItemMeta, type BucketedDiffs } from "../lib/digest/summarize";
+import { buildTimeMachineSummary } from "../lib/digest/time-machine";
 import type { Explanation } from "../lib/scoring/score";
 import type { ScoredDiff } from "../lib/watchlist/scored-diff";
 
@@ -26,6 +27,10 @@ function explanation(overrides: Partial<Explanation>): Explanation {
     sector_change_pct: 0.2,
     sector_used: "IT",
     data_completeness: "full",
+    stale: false,
+    conflict: false,
+    alt_source: null,
+    alt_price: null,
     ...overrides,
   };
 }
@@ -71,6 +76,7 @@ function diff(overrides: Partial<ScoredDiff>): ScoredDiff {
     symbol: "TEST",
     isFirstView: false,
     currentSnapshotId: "snap-1",
+    currentSnapshotFetchedAt: new Date().toISOString(),
     priceThen: 100,
     priceNow: 103,
     priceDelta: 3,
@@ -79,6 +85,10 @@ function diff(overrides: Partial<ScoredDiff>): ScoredDiff {
     volumeNow: 1000,
     timeElapsedMs: 3_600_000,
     seenAt: new Date().toISOString(),
+    conflict: false,
+    altSource: null,
+    altPrice: null,
+    usedSource: "yahoo",
     ...overrides,
   };
 }
@@ -148,6 +158,29 @@ assert(firstVisitSummary.kind === "first-visit", "summaryLine: only newlyAdded -
 assert(
   firstVisitSummary.text === "1 stock added — here's your first look.",
   `summaryLine: first-visit text (got "${firstVisitSummary.text}")`,
+);
+
+// --- Phase 8: buildTimeMachineSummary --------------------------------------
+assert(
+  buildTimeMachineSummary(diff({ isFirstView: true, priceDeltaPct: null })) ===
+    "Nothing to compare yet — this is the first time this stock has been checked.",
+  "buildTimeMachineSummary: first-view stock gets a graceful no-comparison message, not an error",
+);
+
+const upSummary = buildTimeMachineSummary(
+  diff({ priceDeltaPct: 3, explanation: explanation({ volume_ratio: 1, market_change_pct: 3, sector_change_pct: 3 }) }),
+);
+assert(upSummary.startsWith("Up 3.00%"), `buildTimeMachineSummary: positive delta reads "Up X%" (got "${upSummary}")`);
+assert(upSummary.includes("Mostly tracked the broader market."), "buildTimeMachineSummary: reuses interpretExplanation when an explanation is present");
+
+const downSummary = buildTimeMachineSummary(diff({ priceDeltaPct: -2.5 }));
+assert(downSummary.startsWith("Down 2.50%"), `buildTimeMachineSummary: negative delta reads "Down X%" (got "${downSummary}")`);
+assert(!downSummary.includes("undefined") && !downSummary.includes("null"), "buildTimeMachineSummary: no explanation -> no crash, no stray null/undefined text");
+
+const noDeltaSummary = buildTimeMachineSummary(diff({ priceDeltaPct: null }));
+assert(
+  noDeltaSummary.startsWith("No price change on record"),
+  `buildTimeMachineSummary: null delta is handled gracefully (got "${noDeltaSummary}")`,
 );
 
 if (failures > 0) {
