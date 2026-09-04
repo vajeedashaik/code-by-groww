@@ -10,6 +10,98 @@ Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
 
 **Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4–9 (seen-state/diffing, scoring, digest, thesis, …).
 
+## Current state — Phase 4: Seen-State & Diffing (BUILT, pending browser/manual verification)
+
+Tracks, per user per symbol, which `market_snapshots` row the user last saw,
+and computes a raw diff (price/volume/time) against the current latest
+snapshot whenever `/watchlist` loads. No scoring/meaningfulness, no
+sector/market comparison, no digest UI, no thesis logic — those stay for
+Phases 5–7.
+
+### What is built (Phase 4)
+
+| Area | Files |
+| --- | --- |
+| Latest-snapshot-with-id helper | `lib/watchlist/snapshots.ts` — `latestSnapshotWithIdBySymbol()`; separate from `page.tsx`'s Phase 3 helper because this one needs the row `id` (for writing `last_seen_snapshot_id`), the Phase 3 one didn't |
+| Diff computation | `lib/watchlist/diff.ts` — `SymbolDiff` type + `computeDiffsForUser(supabase, userId, symbols)`; exactly 3 queries regardless of watchlist size (seen rows, latest snapshots, "then" snapshots by id) — no N+1; `isFirstView: true` when no seen-state row exists (or its `last_seen_snapshot_id` is null) instead of a fake zero-delta |
+| Mark-as-seen | `app/(protected)/watchlist/actions.ts` — `markWatchlistSeen()` server action; re-queries the *current* latest snapshot per symbol server-side at write time (never trusts a client-supplied snapshot id) — this is the race-condition policy; upserts on the Phase 1 `(user_id, symbol)` primary key, so repeated calls are idempotent; skips symbols with no snapshot yet (no null-id row written) |
+| Diffs API | `app/api/watchlist/diffs/route.ts` — `GET /api/watchlist/diffs`, Clerk-gated, returns every current-watchlist symbol's diff in one response |
+| Time phrasing | `lib/watchlist/format-elapsed.ts` — `formatElapsed(ms)`, relative phrasing ("4 hours ago") chosen over an exact timestamp — matches the phase4 brief's own example copy and the casual tone Phase 6's digest is meant to have |
+| UI wiring | `components/watchlist/diff-panel.tsx` — `WatchlistDiffsProvider` (client, fetches `/api/watchlist/diffs` once on mount via React Context, then calls `markWatchlistSeen()` only after the diffs are in state — never before) + `DiffLine` (renders one symbol's diff, or "First time viewing") |
+| Modified | `app/(protected)/watchlist/page.tsx` (wraps the item list in `WatchlistDiffsProvider`, adds a `DiffLine` per row) |
+
+### Race condition policy (Task 2 of phase4.md)
+
+**Chosen policy: always mark-as-seen against whatever snapshot is actually
+current at the moment the write happens, re-queried server-side.**
+`markWatchlistSeen()` takes no snapshot id as input at all — it looks up
+"latest `market_snapshots` row per symbol, right now" itself, inside the
+action, every time it runs. So in the spec's example sequence (client reads
+snapshot A, a background job writes B, then the stale mark-as-seen request
+from the A-page-load fires), the action's own query returns B — it marks B
+seen, not A. Nothing is silently lost at the data layer: the seen-state
+always ends up pointing at a real snapshot that existed at write time.
+
+The one accepted UI-level gap: if B is written *after* the diff panel's
+fetch but *before* `markWatchlistSeen()` fires (a few-hundred-ms window),
+the user's displayed diff was computed against A as "current" but seen-state
+gets marked against B — so B's own change is marked seen without ever being
+shown as a diff. This is a display-timing gap, not data corruption, and is
+exactly the kind of case Phase 5+ (which will presumably re-diff against
+what was actually last *shown*, or accept this as bounded staleness) can
+revisit; Phase 4's job was correctness of the stored state, not eliminating
+every possible display race.
+
+### Removed-item seen-state decision (Task 8 of phase4.md)
+
+**Chosen: leave orphaned `user_seen_state` rows in place, ignore them.**
+Both `markWatchlistSeen()` and `computeDiffsForUser()` derive their symbol
+list from the user's *current* `watchlist_items`, so a row for a symbol the
+user has since removed is simply never read or written again — no ghost
+entries reach the diff API, no error path exists. Mirrors the Phase 3
+precedent of leaving `daily_history` rows in place after the smoke test —
+dead reference rows are an accepted, harmless gap, not corruption. A future
+retention/cleanup job (if ever needed) can be added without touching this
+phase's logic.
+
+### Phase 4 verification
+
+- `npx tsc --noEmit` — exit 0, no output.
+- `npx next build` — compiled successfully, 11 routes + middleware, 0
+  errors. `/api/watchlist/diffs` listed as a dynamic (ƒ) route.
+- **Browser/manual tests — not yet run** (need a real Clerk session +
+  manual Inngest-dashboard triggering for the race-condition scenarios).
+  See phase4.md's 8-item TESTING list; all 8 are the user's job, same as
+  Phase 3's browser tests. In particular tests 3 and 5 (trigger a new
+  snapshot at a specific moment mid-flow) and tests 4/7/8 (visually
+  inspecting `user_seen_state` in Supabase) cannot be done headlessly.
+
+### Phase 4 manual steps outstanding (from phase4.md's "MANUAL STEPS")
+
+- [ ] Manually trigger the Phase 3 snapshot job via the Inngest dev
+  dashboard at a specific moment while `/watchlist` is open, to exercise the
+  race-condition scenario (tests 3 and 5).
+- [ ] Inspect `user_seen_state` in Supabase's table editor after each test
+  scenario to visually confirm exactly one row per `(user, symbol)`.
+- [x] Decide "last checked" phrasing — relative ("4 hours ago"), see
+  `lib/watchlist/format-elapsed.ts` and the note above.
+
+### Phase 4 deviations from spec
+
+1. **`markWatchlistSeen` is a server action, not a separate API route** —
+   phase4.md's Task 1 allows either ("server action / API route"); a server
+   action can be called directly from the client component without an extra
+   fetch round trip, and Next.js RPCs it automatically.
+2. **Diff display goes through the API route even though `/watchlist` is a
+   Server Component that could compute diffs inline** — deliberate, so the
+   diffs genuinely arrive as one batched `GET /api/watchlist/diffs` request
+   observable in the browser's network tab (acceptance test 6 asks for
+   exactly this), and so `markWatchlistSeen()` can be sequenced to fire
+   strictly after the diff is rendered (client-side `useEffect`), which a
+   pure Server Component render can't express.
+3. **No test runner** — same Phase 2 deviation still applies; verification
+   is `tsc`/`build`/manual browser tests, not automated unit tests.
+
 ## Current state — Phase 3: Market Data Pipeline (COMPLETE, pending browser verification)
 
 Two Inngest scheduled jobs now keep real prices and daily history flowing into
@@ -379,5 +471,9 @@ the user, not yet reviewed) currently sit **untracked** in the working tree.
   `http://localhost:3000`.
 - Phase 3 built, compiling, and backend-smoke-tested (see the Phase 3 section
   above). Run the README "Phase 3 acceptance tests" in a browser — especially
-  #2, #5, #6, and the full unattended #8 — before starting Phase 4
-  (Seen-State & Diffing — see `phase4.md`, if present).
+  #2, #5, #6, and the full unattended #8.
+- Phase 4 built and compiling (see the Phase 4 section above) — seen-state
+  tracking + raw diffing, `GET /api/watchlist/diffs`, diff shown on
+  `/watchlist` before mark-as-seen fires. Run phase4.md's 8-item TESTING list
+  in a browser (needs manual Inngest-dashboard triggers for the
+  race-condition scenarios) before starting Phase 5 (Meaningfulness Engine).
