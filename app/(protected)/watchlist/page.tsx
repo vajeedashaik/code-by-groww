@@ -2,6 +2,7 @@ import { createServerSupabaseClient } from "@/lib/supabase/server";
 import AddStock from "@/components/watchlist/add-stock";
 import RemoveStockButton from "@/components/watchlist/remove-stock-button";
 import PriceCell from "@/components/watchlist/price-cell";
+import { WatchlistDiffsProvider, DiffLine } from "@/components/watchlist/diff-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -122,40 +123,45 @@ export default async function WatchlistPage() {
       )}
 
       {items.length > 0 && (
-        <ul className="divide-y divide-gray-200 rounded border border-gray-200">
-          {items.map((item) => {
-            const snap = priceBySymbol.get(item.symbol);
-            return (
-              <li key={item.id} className="p-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="flex items-baseline gap-2">
-                      <span className="font-medium">{item.symbol}</span>
-                      {item.company_name && (
-                        <span className="truncate text-sm text-gray-500">
-                          {item.company_name}
-                        </span>
+        <WatchlistDiffsProvider>
+          <ul className="divide-y divide-gray-200 rounded border border-gray-200">
+            {items.map((item) => {
+              const snap = priceBySymbol.get(item.symbol);
+              return (
+                <li key={item.id} className="p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-medium">{item.symbol}</span>
+                        {item.company_name && (
+                          <span className="truncate text-sm text-gray-500">
+                            {item.company_name}
+                          </span>
+                        )}
+                      </div>
+                      {item.thesis && (
+                        <p className="mt-1 text-sm text-gray-700">{item.thesis}</p>
                       )}
+                      <p className="mt-1 text-xs text-gray-400">
+                        Added {formatDate(item.added_at)}
+                      </p>
+                      <p className="mt-1">
+                        <DiffLine symbol={item.symbol} />
+                      </p>
                     </div>
-                    {item.thesis && (
-                      <p className="mt-1 text-sm text-gray-700">{item.thesis}</p>
-                    )}
-                    <p className="mt-1 text-xs text-gray-400">
-                      Added {formatDate(item.added_at)}
-                    </p>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <PriceCell
+                        price={snap?.price}
+                        prevClose={prevCloseBySymbol.get(item.symbol)}
+                      />
+                      <RemoveStockButton id={item.id} symbol={item.symbol} />
+                    </div>
                   </div>
-                  <div className="flex shrink-0 flex-col items-end gap-2">
-                    <PriceCell
-                      price={snap?.price}
-                      prevClose={prevCloseBySymbol.get(item.symbol)}
-                    />
-                    <RemoveStockButton id={item.id} symbol={item.symbol} />
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                </li>
+              );
+            })}
+          </ul>
+        </WatchlistDiffsProvider>
       )}
     </div>
   );
