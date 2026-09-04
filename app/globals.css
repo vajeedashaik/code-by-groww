@@ -23,6 +23,7 @@
   --animate-marquee-vertical: marquee-vertical var(--duration, 40s) linear infinite;
   --animate-pulse-ring: pulse-ring 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   --animate-float: float 6s ease-in-out infinite;
+  --animate-dot-twinkle: dot-twinkle 3s ease-in-out infinite;
   --animate-skeleton-shimmer: skeleton-shimmer 1.6s ease-in-out infinite;
 
   @keyframes shimmer-slide {
@@ -94,6 +95,17 @@
     }
     50% {
       transform: translateY(-8px);
+    }
+  }
+  @keyframes dot-twinkle {
+    0%,
+    100% {
+      opacity: 0.3;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.9;
+      transform: scale(1.4);
     }
   }
   @keyframes skeleton-shimmer {

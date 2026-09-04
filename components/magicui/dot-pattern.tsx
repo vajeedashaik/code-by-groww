@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useEffect, useId, useRef, useState } from "react";
-import { motion } from "motion/react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -17,7 +16,17 @@ interface DotPatternProps extends React.SVGProps<SVGSVGElement> {
   glow?: boolean;
 }
 
-/** Ambient dot-grid background. Adapted from Magic UI's dot-pattern. */
+/** Number of dots that actually twinkle — everything else is a static pattern fill. */
+const TWINKLE_COUNT = 20;
+
+/**
+ * Ambient dot-grid background. The full grid is a single tiled SVG <pattern>
+ * fill (one draw call, GPU-composited) instead of one node per dot — a
+ * viewport-sized grid at 24px spacing is 3,000-4,000+ cells, and animating
+ * each individually via Framer Motion was the site's main source of jank.
+ * A small fixed set of dots gets a real CSS @keyframes animation on top of
+ * the static fill to keep the "twinkling" look cheaply.
+ */
 export function DotPattern({
   width = 24,
   height = 24,
@@ -48,16 +57,29 @@ export function DotPattern({
 
   const cols = Math.max(1, Math.ceil(dimensions.width / width));
   const rows = Math.max(1, Math.ceil(dimensions.height / height));
-  const dots = Array.from({ length: cols * rows }, (_, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    return {
-      x: col * width + cx + x,
-      y: row * height + cy + y,
-      delay: Math.random() * 5,
-      duration: Math.random() * 3 + 2,
-    };
-  });
+
+  const twinkleDots = useMemo(() => {
+    if (!glow) return [];
+    const total = cols * rows;
+    const count = Math.min(TWINKLE_COUNT, total);
+    const picked = new Set<number>();
+    while (picked.size < count) {
+      picked.add(Math.floor(Math.random() * total));
+    }
+    return [...picked].map((i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      return {
+        x: col * width + cx + x,
+        y: row * height + cy + y,
+        delay: Math.random() * 5,
+        duration: Math.random() * 3 + 2,
+      };
+    });
+    // Only re-pick when the grid actually resizes — a random set is fine to
+    // keep across re-renders, it doesn't need to track every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cols, rows, glow]);
 
   return (
     <svg
@@ -67,31 +89,30 @@ export function DotPattern({
       {...props}
     >
       <defs>
-        <radialGradient id={`${id}-gradient`}>
-          <stop offset="0%" stopColor="currentColor" stopOpacity="1" />
-          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
-        </radialGradient>
+        <pattern id={`${id}-grid`} width={width} height={height} patternUnits="userSpaceOnUse" x={x} y={y}>
+          <circle cx={cx} cy={cy} r={cr} fill={glow ? `url(#${id}-gradient)` : "currentColor"} />
+        </pattern>
+        {glow && (
+          <radialGradient id={`${id}-gradient`}>
+            <stop offset="0%" stopColor="currentColor" stopOpacity="1" />
+            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          </radialGradient>
+        )}
       </defs>
-      {dots.map((dot) => (
-        <motion.circle
+      <rect width="100%" height="100%" fill={`url(#${id}-grid)`} />
+      {twinkleDots.map((dot) => (
+        <circle
           key={`${dot.x}-${dot.y}`}
           cx={dot.x}
           cy={dot.y}
           r={cr}
-          fill={glow ? `url(#${id}-gradient)` : "currentColor"}
-          initial={glow ? { opacity: 0.3, scale: 1 } : {}}
-          animate={glow ? { opacity: [0.3, 0.9, 0.3], scale: [1, 1.4, 1] } : {}}
-          transition={
-            glow
-              ? {
-                  duration: dot.duration,
-                  repeat: Infinity,
-                  repeatType: "reverse",
-                  delay: dot.delay,
-                  ease: "easeInOut",
-                }
-              : {}
-          }
+          fill={`url(#${id}-gradient)`}
+          style={{
+            transformBox: "fill-box",
+            transformOrigin: "center",
+            animation: `dot-twinkle ${dot.duration}s ease-in-out infinite`,
+            animationDelay: `${dot.delay}s`,
+          }}
         />
       ))}
     </svg>
