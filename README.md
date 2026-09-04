@@ -3,7 +3,7 @@
 
 
 
-# Smart Market Watchlist
+# Groww Pulse
 
 A watchlist that remembers exactly what you last saw, and only interrupts you
 again when a stock's move is genuinely meaningful — not just loud. Every
