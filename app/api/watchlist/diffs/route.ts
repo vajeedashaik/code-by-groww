@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { computeDiffsForUser } from "@/lib/watchlist/diff";
+import { computeAndPersistScores } from "@/lib/scoring/compute-for-diffs";
 
 /**
  * GET /api/watchlist/diffs
@@ -10,6 +11,10 @@ import { computeDiffsForUser } from "@/lib/watchlist/diff";
  * one response — one query round-trip set (3 queries total, see
  * computeDiffsForUser), not one request per symbol. This is what the
  * /watchlist page's client-side diff panel calls on mount.
+ *
+ * Phase 5: also computes and persists a meaningfulness score/bucket/
+ * confidence/explanation for every non-first-view diff, merged into each
+ * diff's response object. First-view diffs get none of these fields.
  */
 export async function GET() {
   const { userId } = await auth();
@@ -29,5 +34,19 @@ export async function GET() {
 
   const symbols = [...new Set((items ?? []).map((i) => i.symbol))];
   const diffs = await computeDiffsForUser(supabase, userId, symbols);
-  return NextResponse.json({ diffs });
+  const scores = await computeAndPersistScores(supabase, userId, diffs);
+
+  const merged = diffs.map((diff) => {
+    const score = scores.get(diff.symbol);
+    if (!score) return diff;
+    return {
+      ...diff,
+      score: score.score,
+      bucket: score.bucket,
+      confidence: score.confidence,
+      explanation: score.explanation,
+    };
+  });
+
+  return NextResponse.json({ diffs: merged });
 }
