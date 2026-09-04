@@ -47,6 +47,16 @@ export function bucketDiffs(
       result.notable.push(entry);
     } else if (diff.bucket === "Routine") {
       result.routine.push(entry);
+    } else {
+      // A non-first-view diff with no bucket means the diffs API failed to
+      // merge Phase 5's scoring fields onto this symbol — an upstream
+      // contract violation, not a normal state. Fall back to Routine
+      // (never silently drop a stock from the digest) and log loudly so
+      // the underlying bug is visible instead of invisible.
+      console.error(
+        `[bucketDiffs] non-first-view diff for ${item.symbol} has no bucket — falling back to Routine`,
+      );
+      result.routine.push(entry);
     }
   }
 
