@@ -81,8 +81,8 @@ Open <http://localhost:3000>.
 | `/`          | public        | Landing page                                       |
 | `/sign-in`   | public        | Clerk sign-in                                      |
 | `/sign-up`   | public        | Clerk sign-up                                      |
-| `/dashboard` | authenticated | "Welcome, {name}" — proof auth works               |
-| `/watchlist` | authenticated | Stock search + per-user watchlist CRUD (Phase 2)    |
+| `/dashboard` | authenticated | "While you were away" digest — Urgent/Notable/Routine buckets, why-flagged detail (Phase 6) |
+| `/watchlist` | authenticated | Stock search + per-user watchlist CRUD, raw table view (Phase 2/4) |
 | `/debug`     | authenticated | **temporary** — auth + RLS + DB round-trip check   |
 | `/api/search`| authenticated | JSON stock search (Finnhub + static NSE fallback)   |
 | `/api/inngest`| internal      | Inngest sync/invoke endpoint (not user-facing)     |

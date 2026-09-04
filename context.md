@@ -10,6 +10,98 @@ Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
 
 **Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4–9 (seen-state/diffing, scoring, digest, thesis, …).
 
+## Current state — Phase 6: "While You Were Away" Digest UI (BUILT, pending browser/manual verification)
+
+Replaces `/dashboard`'s Phase 1 placeholder with the digest — the primary
+UI surface and the moment the product's core promise (Phase 5's scoring)
+becomes visible. `/watchlist` (Phase 2/4's raw table) stays as a secondary
+view, two-way linked with `/dashboard`. Built via
+`superpowers:subagent-driven-development` — 13 tasks, spec-compliance +
+code-quality review each, one real issue found and fixed. Full design:
+`docs/superpowers/specs/2026-09-04-phase6-digest-ui-design.md`; full plan:
+`docs/superpowers/plans/2026-09-04-phase6-digest-ui.md`.
+
+### What is built (Phase 6)
+
+| Area | Files |
+| --- | --- |
+| Shared type extraction | `lib/watchlist/scored-diff.ts` — `ScoredDiff` type moved out of `diff-panel.tsx` so digest components can import it without reaching into a client component file |
+| Provider hook export | `components/watchlist/diff-panel.tsx` gains `useWatchlistDiffs()` — reads Phase 4's already-fetched diffs Map without a second fetch or any change to the race-verified fetch→setState→markWatchlistSeen ordering (re-verified byte-for-byte in code review) |
+| Interpretation engine | `lib/digest/interpret.ts` — `interpretExplanation()`: ordered rule chain (high volume + independent move / high volume + tracked / independent + normal volume / tracked + normal volume / no comparison data), named threshold constants (`HIGH_VOLUME_RATIO=2`, `INDEPENDENT_MOVE_THRESHOLD_PP=1`) for the hand-tuning phase6.md's manual step 2 expects |
+| Bucketing + headline | `lib/digest/summarize.ts` — `bucketDiffs()` groups watchlist items into Urgent/Notable/Routine/NewlyAdded; `summaryLine()` produces one of three headline variants (normal/calm/first-visit). Fixed in review: an unbucketed non-first-view diff (upstream contract violation) now logs and falls back to Routine instead of silently vanishing from the digest |
+| Verification script | `scripts/verify-digest.ts` (`npm run verify:digest`) — 16 checks against the pure `lib/digest/` functions: all 5 interpretation rules, all 4 bucket categories + the omit-if-no-diff case, all 3 summary headline variants including exact pluralization |
+| Digest components | `components/digest/{why-flagged-detail,stock-card,routine-line,newly-added-section,bucket-section,digest-view}.tsx` — full evidence-trail detail (the one place confidence appears), full Urgent/Notable card (price+%-since-last-seen, interpretation, expandable detail), compact Routine line, lightweight first-view list, a single parametrized collapsible-section wrapper using native `<details>` (no custom JS state), and the top-level assembly reading from `useWatchlistDiffs()` |
+| Route rewrite | `app/(protected)/dashboard/page.tsx` — Server Component fetching `watchlist_items(symbol, company_name)`, wraps `DigestView` in `WatchlistDiffsProvider`; `app/(protected)/watchlist/page.tsx` gains a small reciprocal "Back to digest" link |
+
+### Bucketing/empty-state logic, precisely
+
+- **Normal**: `urgent.length + notable.length > 0` → "N meaningful changes across M stocks." Urgent/Notable sections open by default (`<details open>`), Routine collapsed.
+- **Calm** (zero meaningful changes): `urgent`/`notable` both empty but `routine.length + newlyAdded... ` — specifically, `hasAnyScored` (urgent+notable+routine > 0) is true and `meaningfulCount` is 0 → "Nothing meaningful changed since you last checked." Routine section still renders (collapsed) underneath if non-empty — the calm state is about the headline, not about hiding data.
+- **First-visit**: `hasAnyScored` is false (nothing has been scored at all yet) and `newlyAdded.length > 0` → "N stocks added — here's your first look." Only the Newly Added section renders — visually and textually distinct from the calm state, per phase6.md's explicit requirement.
+- **Loading/error**: `DigestView` shows "Checking for changes…" while `useWatchlistDiffs().loading` is true, or a red error box if the fetch failed (`diffs === null`) — mirrors `DiffLine`'s existing states.
+- **Empty watchlist**: unchanged Phase 2 pattern (dashed-border "nothing yet" box), not a digest-specific concern.
+
+### Phase 6 code review findings
+
+One real issue found and fixed:
+- `bucketDiffs` had no `else` branch — a non-first-view diff with an
+  unexpected missing `bucket` (an upstream Phase 5 API contract violation)
+  would silently vanish from every bucket, invisible in production, for a
+  product whose entire thesis is "don't miss something urgent." Fixed:
+  logs a `console.error` and falls back to the Routine bucket so the stock
+  is never lost, just possibly misclassified with a visible trail.
+
+All other reviews (10 of 12 code tasks) passed clean on the first pass —
+no critical/important findings. Two Minor, forward-looking notes not
+acted on: (1) `pctColor`/`pctLabel` formatting logic is duplicated across
+`DiffLine`, `StockCard`, and `RoutineLine` (a plan-level choice, not an
+implementation gap — worth extracting to a shared helper in a later
+polish pass); (2) `BucketSection`'s `defaultOpen` prop is safe only
+because both call sites pass static literals, not computed values — noted
+as a maintenance footgun for whoever touches `digest-view.tsx` next.
+
+### Phase 6 verification
+
+- `npm run typecheck` — exit 0, no output.
+- `npm run build` — compiled successfully, 11 routes + middleware, 0
+  errors. `/dashboard` now a genuine dynamic (ƒ) route (3.16 kB) instead
+  of the Phase 1 placeholder.
+- `npm run verify:digest` — all 16 checks pass.
+- `npm run verify:scoring` — re-run as a regression check, all 13 checks
+  still pass (confirms Phase 6 didn't touch `lib/scoring/`).
+- **Browser/manual tests — not yet run.** ALL 8 of phase6.md's TESTING
+  items require a browser, a real Clerk session, a populated multi-symbol
+  watchlist, a mobile-width resize, and (test 8) a "cold read" from
+  someone unfamiliar with the project — none of these can be done
+  headlessly. This is the user's job, same as every prior phase.
+
+### Phase 6 manual steps outstanding (from phase6.md's "MANUAL STEPS")
+
+- [ ] Look at the digest with real test data and judge honestly: does it
+  feel calm and useful, or still like a noisy dashboard?
+- [ ] Manually tune `lib/digest/interpret.ts`'s template rules against a
+  handful of real `change_events` — read them out loud, rewrite anything
+  that doesn't sound like a sharp human analyst.
+- [ ] Decide final empty/calm-state copy (currently "Nothing meaningful
+  changed since you last checked." / "N stocks added — here's your first
+  look.") — small wording choices here matter more than they seem.
+- [ ] Take screenshots once it looks good, for the pitch deck.
+
+### Phase 6 deviations from spec
+
+1. **No test runner** — same Phase 2-5 deviation; verification is
+   `tsc`/`build`/`verify:digest`/`verify:scoring` scripts, not jest/vitest.
+2. **`ScoredDiff` type extracted to its own file** (`lib/watchlist/scored-diff.ts`)
+   rather than left inline in `diff-panel.tsx` — not explicitly called out
+   in phase6.md, but necessary so `lib/digest/` (pure, non-React code)
+   doesn't import from a `"use client"` component file.
+3. **Executed directly on `master`**, same as every prior phase — user
+   explicitly re-confirmed continuing the established convention rather
+   than a worktree/branch.
+4. **README.md's route table entry for `/dashboard` updated** alongside
+   this phase's context.md update — it still described the Phase 1
+   placeholder ("Welcome, {name}"), caught during Task 11's code review.
+
 ## Current state — Phase 5: Meaningfulness Engine (BUILT, pending browser/manual verification)
 
 Converts Phase 4's raw price/volume diff into a volatility-normalized,
@@ -667,17 +759,22 @@ not by phase number.)
 `node_modules/`, `.next/`, `.env*.local` are gitignored. `phase2.md` was
 committed with the scaffold by accident — harmless. `phase3.md` and
 `phase4.md` are tracked (committed alongside their phases' work).
-`phase5.md` and `phase6.md` (phase briefs dropped in by the user) currently
-sit **untracked** in the working tree. Phase 5's design/plan docs live in
-`docs/superpowers/specs/2026-09-04-phase5-meaningfulness-engine-design.md`
-and `docs/superpowers/plans/2026-09-04-phase5-meaningfulness-engine.md`.
+`phase5.md`, `phase6.md`, and `phase7.md` (phase briefs dropped in by the
+user) currently sit **untracked** in the working tree. Phase 5's and
+Phase 6's design/plan docs live in `docs/superpowers/specs/` and
+`docs/superpowers/plans/` (2026-09-04-dated files for each).
 
 16 more commits landed for Phase 5 (migration + sectors + pure scoring math
 + orchestration + wiring + review-fix commits), oldest first, after
 `fe0ee02`: `a6c302e`, `4dc7cc6`, `8a8942d`, `9f9e8bb`, `89f2fba`, `86482ff`,
 `947f583`, `cfce083`, `fa4a356`, `b22ca37`, `1a2cf09`, `76d23a1`, `9085fe9`,
-`4a2e3a0`, `d144398`, `f20ada3` — see the Phase 5 section above for what
-each does; full messages via `git log --oneline fe0ee02..HEAD`.
+`4a2e3a0`, `d144398`, `f20ada3`. Then 16 more for Phase 6 (spec/plan docs +
+hook export + pure lib/digest modules + verification script + component
+tree + route rewrite), oldest first, after `7ed5c5f`: `c7b3a9f`, `2314845`,
+`3646fb7`, `aea8362`, `3965683`, `d7c36ef`, `d0cbf83`, `7412c82`, `7875b11`,
+`5c4cf7e`, `3814d7c`, `ce580f9`, `bb69ccf`, `27ba17a`, `612c40d` — see the
+Phase 5/6 sections above for what each does; full messages via
+`git log --oneline fe0ee02..HEAD`.
 
 ## How to continue
 
@@ -697,6 +794,15 @@ each does; full messages via `git log --oneline fe0ee02..HEAD`.
   `GET /api/watchlist/diffs`, `change_events` persisted with snapshot-based
   dedup, `DiffLine` shows `[Bucket, score, Confidence]` as plain text. Run
   migration `0004` in Supabase, then phase5.md's 8-item TESTING list in a
-  browser (tests 5-8 need real multi-day data + a Clerk session) before
-  starting Phase 6 (the "While You Were Away" digest UI, spec already in
-  `phase6.md`).
+  browser (tests 5-8 need real multi-day data + a Clerk session).
+- Phase 6 built, typechecking, building, and digest-verified (see the
+  Phase 6 section above) — `/dashboard` is now the "While You Were Away"
+  digest (Urgent/Notable/Routine buckets, plain-language interpretations,
+  why-flagged detail), `/watchlist` kept as a secondary raw-table view.
+  Run ALL 8 of phase6.md's TESTING items in a browser (none can be done
+  headlessly — mixed-bucket data, the zero-change and first-visit states,
+  15+ stocks, mobile width, and a cold-read comprehension check) and its
+  4 manual steps (judging calm-vs-noisy feel, hand-tuning the
+  interpretation templates, finalizing empty-state copy, screenshots)
+  before starting Phase 7 (Personal Thesis + AI Relevance Check, brief
+  already in `phase7.md`).
