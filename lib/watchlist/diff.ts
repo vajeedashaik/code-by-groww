@@ -35,7 +35,10 @@ export async function computeDiffsForUser(
 ): Promise<SymbolDiff[]> {
   if (symbols.length === 0) return [];
 
-  const [{ data: seenRows }, { data: snapRows }] = await Promise.all([
+  const [
+    { data: seenRows, error: seenError },
+    { data: snapRows, error: snapError },
+  ] = await Promise.all([
     supabase
       .from("user_seen_state")
       .select("symbol, last_seen_snapshot_id, seen_at")
@@ -48,6 +51,12 @@ export async function computeDiffsForUser(
       .order("fetched_at", { ascending: false })
       .limit(symbols.length * 10),
   ]);
+  if (seenError) {
+    console.error(`[computeDiffsForUser] user_seen_state query failed: ${seenError.message}`);
+  }
+  if (snapError) {
+    console.error(`[computeDiffsForUser] market_snapshots query failed: ${snapError.message}`);
+  }
 
   const currentBySymbol = latestSnapshotWithIdBySymbol(snapRows ?? []);
   const seenBySymbol = new Map((seenRows ?? []).map((r) => [r.symbol, r]));
@@ -65,10 +74,13 @@ export async function computeDiffsForUser(
     { price: number; volume: number | null; fetched_at: string }
   >();
   if (thenIds.length > 0) {
-    const { data: thenRows } = await supabase
+    const { data: thenRows, error: thenError } = await supabase
       .from("market_snapshots")
       .select("id, price, volume, fetched_at")
       .in("id", thenIds);
+    if (thenError) {
+      console.error(`[computeDiffsForUser] "then" snapshots query failed: ${thenError.message}`);
+    }
     for (const row of thenRows ?? []) {
       thenById.set(row.id, row);
     }

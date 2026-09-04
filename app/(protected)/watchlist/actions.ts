@@ -135,19 +135,27 @@ export async function markWatchlistSeen(): Promise<ActionResult> {
 
   const supabase = createServerSupabaseClient();
 
-  const { data: items } = await supabase
+  const { data: items, error: itemsError } = await supabase
     .from("watchlist_items")
     .select("symbol")
     .eq("user_id", userId);
+  if (itemsError) {
+    console.error(`[markWatchlistSeen] watchlist_items query failed: ${itemsError.message}`);
+    return { ok: false, message: "Couldn't update seen-state." };
+  }
   const symbols = [...new Set((items ?? []).map((i) => i.symbol))];
   if (symbols.length === 0) return { ok: true };
 
-  const { data: snapRows } = await supabase
+  const { data: snapRows, error: snapError } = await supabase
     .from("market_snapshots")
     .select("id, symbol, price, volume, source, fetched_at")
     .in("symbol", symbols)
     .order("fetched_at", { ascending: false })
     .limit(symbols.length * 10);
+  if (snapError) {
+    console.error(`[markWatchlistSeen] market_snapshots query failed: ${snapError.message}`);
+    return { ok: false, message: "Couldn't update seen-state." };
+  }
 
   const latestBySymbol = latestSnapshotWithIdBySymbol(snapRows ?? []);
   const seenAt = new Date().toISOString();
@@ -171,6 +179,7 @@ export async function markWatchlistSeen(): Promise<ActionResult> {
     .upsert(rows, { onConflict: "user_id,symbol" });
 
   if (error) {
+    console.error(`[markWatchlistSeen] user_seen_state upsert failed: ${error.message}`);
     return { ok: false, message: "Couldn't update seen-state." };
   }
   return { ok: true };
