@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import AddStock from "@/components/watchlist/add-stock";
 import RemoveStockButton from "@/components/watchlist/remove-stock-button";
+import EditThesis from "@/components/watchlist/edit-thesis";
 import PriceCell from "@/components/watchlist/price-cell";
 import { WatchlistDiffsProvider, DiffLine } from "@/components/watchlist/diff-panel";
 
@@ -145,9 +146,12 @@ export default async function WatchlistPage() {
                           </span>
                         )}
                       </div>
-                      {item.thesis && (
-                        <p className="mt-1 text-sm text-gray-700">{item.thesis}</p>
-                      )}
+                      <div className="mt-1">
+                        {item.thesis && (
+                          <p className="text-sm text-gray-700">{item.thesis}</p>
+                        )}
+                        <EditThesis id={item.id} thesis={item.thesis} />
+                      </div>
                       <p className="mt-1 text-xs text-gray-400">
                         Added {formatDate(item.added_at)}
                       </p>
