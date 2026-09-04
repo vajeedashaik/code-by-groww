@@ -12,6 +12,8 @@ import { latestSnapshotWithIdBySymbol } from "@/lib/watchlist/snapshots";
 export interface SymbolDiff {
   symbol: string;
   isFirstView: boolean;
+  /** The market_snapshots row id treated as "now" for this diff — the change_events dedup key. Null when no current snapshot exists yet. */
+  currentSnapshotId: string | null;
   priceThen: number | null;
   priceNow: number | null;
   priceDelta: number | null;
@@ -97,6 +99,7 @@ export async function computeDiffsForUser(
       return {
         symbol,
         isFirstView: true,
+        currentSnapshotId: current?.id ?? null,
         priceThen: null,
         priceNow: current?.price ?? null,
         priceDelta: null,
@@ -118,6 +121,7 @@ export async function computeDiffsForUser(
     return {
       symbol,
       isFirstView: false,
+      currentSnapshotId: current?.id ?? null,
       priceThen: then.price,
       priceNow,
       priceDelta,
