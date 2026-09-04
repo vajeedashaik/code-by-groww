@@ -57,13 +57,32 @@ export function WatchlistDiffsProvider({
         const body: { diffs: ScoredDiff[] } = await res.json();
         if (cancelled) return;
 
-        const diffs = new Map(body.diffs.map((d) => [d.symbol, d]));
-        setState({ diffs, loading: false });
+        const freshDiffs = new Map(body.diffs.map((d) => [d.symbol, d]));
+
+        // A poll (isFirst: false) fires after markWatchlistSeen() has
+        // already advanced the seen pointer to the snapshot shown on the
+        // first fetch — so a re-fetch this soon would show a stale 0% price
+        // delta for that symbol (nothing genuinely changed in 5s) even
+        // though its bucket/score/explanation correctly stay put (see
+        // lib/scoring/compute-for-diffs.ts's reuse-existing-row fix). Rather
+        // than let that stale price flash on screen, a poll only refreshes
+        // each symbol's `thesis` field on top of what's already rendered —
+        // the rest of the diff (price, %, interpretation) is untouched until
+        // the next real page load re-derives it fresh.
+        setState((prev) => {
+          if (isFirst || !prev.diffs) return { diffs: freshDiffs, loading: false };
+          const merged = new Map(prev.diffs);
+          for (const [symbol, fresh] of freshDiffs) {
+            const current = merged.get(symbol);
+            merged.set(symbol, current ? { ...current, thesis: fresh.thesis } : fresh);
+          }
+          return { diffs: merged, loading: false };
+        });
         if (isFirst) await markWatchlistSeen();
 
         if (pollStartRef.current === null) pollStartRef.current = Date.now();
         const elapsed = Date.now() - pollStartRef.current;
-        if (!cancelled && hasPendingThesis(diffs) && elapsed < THESIS_POLL_TIMEOUT_MS) {
+        if (!cancelled && hasPendingThesis(freshDiffs) && elapsed < THESIS_POLL_TIMEOUT_MS) {
           timer = setTimeout(() => fetchOnce(false), THESIS_POLL_INTERVAL_MS);
         }
       } catch {
