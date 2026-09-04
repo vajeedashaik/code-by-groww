@@ -3,6 +3,7 @@ import type { ScoredDiff } from "@/lib/watchlist/scored-diff";
 import { formatElapsed } from "@/lib/watchlist/format-elapsed";
 import { interpretExplanation } from "@/lib/digest/interpret";
 import WhyFlaggedDetail from "@/components/digest/why-flagged-detail";
+import type { ThesisVerdictCategory } from "@/lib/thesis/types";
 
 const inr = new Intl.NumberFormat("en-IN", {
   style: "currency",
@@ -10,8 +11,10 @@ const inr = new Intl.NumberFormat("en-IN", {
   maximumFractionDigits: 2,
 });
 
-/** verdict === null (still checking) uses the "pending" key. */
-const THESIS_STATUS_LABEL: Record<string, string> = {
+type ThesisStatusKey = ThesisVerdictCategory | "pending";
+
+/** verdict === null (still checking) uses the "pending" key. Record<ThesisStatusKey, ...> so a new/renamed ThesisVerdictCategory fails the build here instead of silently rendering blank. */
+const THESIS_STATUS_LABEL: Record<ThesisStatusKey, string> = {
   supports: "Mostly intact",
   contradicts: "Contradicted",
   unclear: "Unclear",
@@ -19,7 +22,7 @@ const THESIS_STATUS_LABEL: Record<string, string> = {
   unavailable: "Unavailable",
   pending: "Checking against your thesis…",
 };
-const THESIS_STATUS_COLOR: Record<string, string> = {
+const THESIS_STATUS_COLOR: Record<ThesisStatusKey, string> = {
   supports: "text-green-700",
   contradicts: "text-red-700",
   unclear: "text-amber-700",

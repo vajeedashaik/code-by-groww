@@ -63,6 +63,22 @@ export const BUCKET_THRESHOLDS = {
   notable: 0.8,
 } as const;
 
+/**
+ * Exported separately (not just inlined in computeMeaningfulness) so
+ * lib/scoring/compute-for-diffs.ts can derive a Bucket from an
+ * already-persisted meaningfulness_score without re-running the full
+ * computation — needed to reuse an existing change_events row unchanged
+ * (Phase 7 fix: re-scoring an already-scored snapshot on every digest poll
+ * was producing a different, wrong result — see compute-for-diffs.ts).
+ */
+export function deriveBucket(score: number): Bucket {
+  return score >= BUCKET_THRESHOLDS.urgent
+    ? "Urgent"
+    : score >= BUCKET_THRESHOLDS.notable
+      ? "Notable"
+      : "Routine";
+}
+
 export function computeMeaningfulness(
   input: MeaningfulnessInput,
 ): MeaningfulnessResult {
@@ -123,12 +139,7 @@ export function computeMeaningfulness(
     SCORE_WEIGHTS.marketRelative * marketRelativeZScore +
     SCORE_WEIGHTS.sectorRelative * sectorRelativeZScore;
 
-  const bucket: Bucket =
-    score >= BUCKET_THRESHOLDS.urgent
-      ? "Urgent"
-      : score >= BUCKET_THRESHOLDS.notable
-        ? "Notable"
-        : "Routine";
+  const bucket = deriveBucket(score);
 
   const hasVolume = volumeRatio !== null;
   const confidence: Confidence = !volatilityAvailable

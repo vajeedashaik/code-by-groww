@@ -9,7 +9,13 @@ import {
 import { loadRecentHistory, type HistoryBar } from "@/lib/scoring/history";
 import { computeVolatilityPct, computeAverageVolume } from "@/lib/scoring/volatility";
 import { computeDailyMovePct, computeSectorBenchmarkPct } from "@/lib/scoring/benchmarks";
-import { computeMeaningfulness, type MeaningfulnessResult } from "@/lib/scoring/score";
+import {
+  computeMeaningfulness,
+  deriveBucket,
+  type Confidence,
+  type Explanation,
+  type MeaningfulnessResult,
+} from "@/lib/scoring/score";
 import type { ThesisSignal } from "@/lib/thesis/types";
 
 function closesOf(bars: HistoryBar[]): number[] {
@@ -35,22 +41,52 @@ export interface ScoreWithMeta extends MeaningfulnessResult {
   thesisAnalysis: ThesisAnalysisSummary | null;
 }
 
+interface ExistingRow {
+  id: string;
+  meaningfulness_score: number | null;
+  confidence: string | null;
+  explanation: Json | null;
+  thesis_verdict: string | null;
+}
+
+function extractThesisAnalysis(explanation: Json | null): ThesisAnalysisSummary | null {
+  if (!explanation || typeof explanation !== "object" || Array.isArray(explanation)) return null;
+  const ta = (explanation as Record<string, unknown>).thesis_analysis;
+  if (!ta || typeof ta !== "object") return null;
+  const t = ta as Record<string, unknown>;
+  return {
+    summary: typeof t.summary === "string" ? t.summary : "",
+    signals: Array.isArray(t.signals) ? (t.signals as ThesisSignal[]) : [],
+  };
+}
+
 /**
  * Scores every non-first-view diff and upserts change_events keyed on
  * (user_id, symbol, snapshot_id) — dedupe-by-snapshot, so reloading
  * /watchlist repeatedly doesn't spam duplicate rows for the same underlying
- * change (Phase 5 design decision). Returns a Map so the diffs route can
- * merge results into its response without a second DB read.
+ * change (Phase 5 design decision).
  *
- * Phase 7: this function runs on every diffs fetch, including the client's
- * thesis-verdict poll (see diff-panel.tsx). Re-upserting `explanation` with
- * only the Phase 5 fields would silently erase any `thesis_analysis` the
- * thesis-relevance Inngest job already wrote into that same jsonb column —
- * so existing rows for the exact (symbol, snapshot_id) pairs being upserted
- * are read first, and any existing `thesis_analysis` is carried forward into
- * the new explanation object before writing. The upsert's own `.select()`
- * then returns that preserved value straight back, so ScoreWithMeta.
- * thesisAnalysis always reflects current DB state without a second read.
+ * Phase 7 fix: this function runs on every diffs fetch, including the
+ * client's 5s thesis-verdict poll (diff-panel.tsx). That poll happens
+ * *after* markWatchlistSeen() has already advanced the user's seen pointer
+ * to the snapshot just shown — so on the very next poll, computeDiffsForUser
+ * sees "then === current" for that symbol and produces a 0%-delta diff. That
+ * diff is still technically "scorable," and re-running computeMeaningfulness
+ * on it would produce a different (near-zero, Routine-bucket) result than
+ * the original detection — and upserting it would silently overwrite the
+ * real change_events row with this phantom zero-delta record, both losing
+ * historical accuracy AND demoting an Urgent/Notable card back to Routine
+ * mid-session while the user is still watching it.
+ *
+ * The fix: once a change_events row already exists for a given
+ * (symbol, snapshot_id), it is never recomputed or rewritten again — it is
+ * simply read back and reused as-is (score/bucket/confidence/explanation/
+ * thesis state all come straight from the persisted row). Only a diff whose
+ * current snapshot has genuinely never been scored before goes through
+ * computeMeaningfulness + upsert. This is what makes repeated polling safe:
+ * a stock's detected change, once recorded, is immutable from this
+ * function's point of view — exactly matching change_events' role as a
+ * historical record.
  *
  * Note: if the change_events upsert fails, this still returns the in-memory
  * computed scores (logged, not thrown) — a caller should not assume a score
@@ -72,7 +108,49 @@ export async function computeAndPersistScores(
   );
   if (scorable.length === 0) return results;
 
-  const symbols = scorable.map((d) => d.symbol);
+  // Read back any change_events rows that already exist for the exact
+  // (symbol, snapshot_id) pairs about to be considered — these are reused
+  // untouched (see doc comment above) rather than recomputed.
+  const existingByKey = new Map<string, ExistingRow>();
+  const snapshotIds = [...new Set(scorable.map((d) => d.currentSnapshotId))];
+  const { data: existingRows, error: existingError } = await supabase
+    .from("change_events")
+    .select("id, symbol, snapshot_id, meaningfulness_score, confidence, explanation, thesis_verdict")
+    .eq("user_id", userId)
+    .in("symbol", scorable.map((d) => d.symbol))
+    .in("snapshot_id", snapshotIds);
+  if (existingError) {
+    console.error(`[computeAndPersistScores] existing-rows query failed: ${existingError.message}`);
+  }
+  for (const row of existingRows ?? []) {
+    if (row.snapshot_id) {
+      existingByKey.set(`${row.symbol}:${row.snapshot_id}`, row);
+    }
+  }
+
+  const toScore = scorable.filter(
+    (diff) => !existingByKey.has(`${diff.symbol}:${diff.currentSnapshotId}`),
+  );
+
+  // Reuse already-scored rows as-is — no recomputation, no re-upsert.
+  for (const diff of scorable) {
+    const existing = existingByKey.get(`${diff.symbol}:${diff.currentSnapshotId}`);
+    if (!existing || existing.meaningfulness_score === null) continue;
+
+    results.set(diff.symbol, {
+      score: existing.meaningfulness_score,
+      bucket: deriveBucket(existing.meaningfulness_score),
+      confidence: (existing.confidence as Confidence | null) ?? "Low",
+      explanation: existing.explanation as unknown as Explanation,
+      changeEventId: existing.id,
+      thesisVerdict: existing.thesis_verdict,
+      thesisAnalysis: extractThesisAnalysis(existing.explanation),
+    });
+  }
+
+  if (toScore.length === 0) return results;
+
+  const symbols = toScore.map((d) => d.symbol);
   const sectorsNeeded = [
     ...new Set(symbols.map(lookupSector).filter((s): s is string => s !== null)),
   ];
@@ -95,29 +173,9 @@ export async function computeAndPersistScores(
     sectorDeltaBySector.set(sector, computeSectorBenchmarkPct(memberCloses));
   }
 
-  // Pre-fetch existing rows for the exact (symbol, snapshot_id) pairs about
-  // to be upserted, so any Phase 7 thesis_analysis already written isn't
-  // clobbered by this call's Phase 5 explanation write (see doc comment).
-  const existingExplanationByKey = new Map<string, Json>();
-  const snapshotIds = [...new Set(scorable.map((d) => d.currentSnapshotId))];
-  const { data: existingRows, error: existingError } = await supabase
-    .from("change_events")
-    .select("symbol, snapshot_id, explanation")
-    .eq("user_id", userId)
-    .in("symbol", symbols)
-    .in("snapshot_id", snapshotIds);
-  if (existingError) {
-    console.error(`[computeAndPersistScores] existing-rows query failed: ${existingError.message}`);
-  }
-  for (const row of existingRows ?? []) {
-    if (row.snapshot_id && row.explanation) {
-      existingExplanationByKey.set(`${row.symbol}:${row.snapshot_id}`, row.explanation);
-    }
-  }
-
   const rows: Database["public"]["Tables"]["change_events"]["Insert"][] = [];
 
-  for (const diff of scorable) {
+  for (const diff of toScore) {
     try {
       const bars = historyBySymbol.get(diff.symbol) ?? [];
       const dailyVolPct = computeVolatilityPct(closesOf(bars));
@@ -144,20 +202,6 @@ export async function computeAndPersistScores(
         thesisAnalysis: null,
       });
 
-      const existingExplanation = existingExplanationByKey.get(`${diff.symbol}:${diff.currentSnapshotId}`);
-      const existingThesisAnalysis =
-        existingExplanation && typeof existingExplanation === "object" && !Array.isArray(existingExplanation)
-          ? (existingExplanation as Record<string, Json | undefined>).thesis_analysis
-          : undefined;
-
-      const explanation: Json =
-        existingThesisAnalysis !== undefined
-          ? ({
-              ...(result.explanation as unknown as Record<string, Json>),
-              thesis_analysis: existingThesisAnalysis,
-            } as Json)
-          : (result.explanation as unknown as Json);
-
       rows.push({
         user_id: userId,
         symbol: diff.symbol,
@@ -165,7 +209,7 @@ export async function computeAndPersistScores(
         meaningfulness_score: result.score,
         magnitude: diff.priceDeltaPct,
         confidence: result.confidence,
-        explanation,
+        explanation: result.explanation as unknown as Json,
       });
     } catch (err) {
       // One symbol's bad/non-finite data must not take down every other
@@ -180,32 +224,14 @@ export async function computeAndPersistScores(
     const { data: upserted, error } = await supabase
       .from("change_events")
       .upsert(rows, { onConflict: "user_id,symbol,snapshot_id" })
-      .select("id, symbol, thesis_verdict, explanation");
+      .select("id, symbol");
     if (error) {
       console.error(`[computeAndPersistScores] change_events upsert failed: ${error.message}`);
     }
     for (const row of upserted ?? []) {
       const existing = results.get(row.symbol);
       if (!existing) continue;
-
-      let thesisAnalysis: ThesisAnalysisSummary | null = null;
-      if (row.explanation && typeof row.explanation === "object" && !Array.isArray(row.explanation)) {
-        const ta = (row.explanation as Record<string, unknown>).thesis_analysis;
-        if (ta && typeof ta === "object") {
-          const t = ta as Record<string, unknown>;
-          thesisAnalysis = {
-            summary: typeof t.summary === "string" ? t.summary : "",
-            signals: Array.isArray(t.signals) ? (t.signals as ThesisSignal[]) : [],
-          };
-        }
-      }
-
-      results.set(row.symbol, {
-        ...existing,
-        changeEventId: row.id,
-        thesisVerdict: row.thesis_verdict,
-        thesisAnalysis,
-      });
+      results.set(row.symbol, { ...existing, changeEventId: row.id });
     }
   }
 
