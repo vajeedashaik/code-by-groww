@@ -3,16 +3,8 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { markWatchlistSeen } from "@/app/(protected)/watchlist/actions";
 import { formatElapsed } from "@/lib/watchlist/format-elapsed";
-import type { SymbolDiff } from "@/lib/watchlist/diff";
-import type { Bucket, Confidence, Explanation } from "@/lib/scoring/score";
-
-/** SymbolDiff plus the Phase 5 fields the diffs API merges in for non-first-view symbols. */
-type ScoredDiff = SymbolDiff & {
-  score?: number;
-  bucket?: Bucket;
-  confidence?: Confidence;
-  explanation?: Explanation;
-};
+import type { Bucket } from "@/lib/scoring/score";
+import type { ScoredDiff } from "@/lib/watchlist/scored-diff";
 
 interface DiffsState {
   diffs: Map<string, ScoredDiff> | null;
@@ -63,6 +55,15 @@ export function WatchlistDiffsProvider({
   return (
     <DiffsContext.Provider value={state}>{children}</DiffsContext.Provider>
   );
+}
+
+/**
+ * Read the shared diffs fetch (the diffs map + loading flag) from outside
+ * DiffLine — used by the Phase 6 digest components so they don't trigger a
+ * second fetch or re-derive the mark-as-seen timing.
+ */
+export function useWatchlistDiffs(): DiffsState {
+  return useContext(DiffsContext);
 }
 
 const BUCKET_COLOR: Record<Bucket, string> = {
