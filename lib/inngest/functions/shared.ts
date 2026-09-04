@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
+import { ALL_REFERENCE_SYMBOLS } from "@/lib/market-data/sectors";
 
 /**
  * Helpers shared by both Inngest jobs. Symbol loading uses the SERVICE-ROLE
@@ -8,7 +9,12 @@ import { createAdminSupabaseClient } from "@/lib/supabase/admin";
  * the jobs run with no user context at all.
  */
 
-/** Distinct, trimmed, upper-cased symbols across every user's watchlist. */
+/**
+ * Distinct, trimmed, upper-cased symbols across every user's watchlist,
+ * unioned with the fixed Phase 5 reference-symbol set (Nifty + every
+ * sector-mapping stock) so both jobs fetch/store them even though no user
+ * has them in watchlist_items — "just another symbol" per phase5.md task 2.
+ */
 export async function loadWatchlistSymbols(): Promise<string[]> {
   const supabase = createAdminSupabaseClient();
   const { data, error } = await supabase
@@ -23,6 +29,9 @@ export async function loadWatchlistSymbols(): Promise<string[]> {
   for (const row of data ?? []) {
     const s = (row.symbol ?? "").trim().toUpperCase();
     if (s) set.add(s);
+  }
+  for (const s of ALL_REFERENCE_SYMBOLS) {
+    set.add(s);
   }
   return [...set];
 }
