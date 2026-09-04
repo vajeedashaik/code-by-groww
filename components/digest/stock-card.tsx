@@ -109,17 +109,17 @@ export default function StockCard({
           </p>
         </div>
       )}
-      <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-2">
+      <div className="mt-3 flex flex-wrap items-start gap-2">
         <button
           type="button"
           onClick={() => setChartOpen((v) => !v)}
-          className="text-xs text-white/40 transition-colors hover:text-pulse"
+          className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-white/70 transition-colors hover:border-pulse/30 hover:bg-white/[0.08] hover:text-pulse"
         >
           {chartOpen ? "Hide chart" : "Chart"}
         </button>
         {diff.explanation && diff.confidence && (
           <details className="group w-full sm:w-auto">
-            <summary className="cursor-pointer text-xs text-white/40 transition-colors hover:text-white/70">
+            <summary className="w-fit cursor-pointer list-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-white/70 transition-colors hover:border-white/20 hover:bg-white/[0.08] hover:text-white">
               Why is this flagged?
             </summary>
             <div className="pt-3">
@@ -135,8 +135,8 @@ export default function StockCard({
         )}
       </div>
       {chartOpen && (
-        <div className="mt-3">
-          <CandlestickChart symbol={item.symbol} height={180} />
+        <div className="mx-auto mt-3 w-full max-w-xl">
+          <CandlestickChart symbol={item.symbol} height={260} />
         </div>
       )}
     </motion.div>

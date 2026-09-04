@@ -33,8 +33,8 @@ export default function TimeMachine({ symbol }: { symbol: string }) {
   if (!diff) return null;
 
   return (
-    <details className="mt-1.5" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary className="cursor-pointer text-xs text-white/35 transition-colors hover:text-pulse">
+    <details onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="w-fit cursor-pointer list-none rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-white/70 transition-colors hover:border-pulse/30 hover:bg-white/[0.08] hover:text-pulse">
         Market Time Machine
       </summary>
       {open &&

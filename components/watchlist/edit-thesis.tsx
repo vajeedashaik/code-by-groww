@@ -29,7 +29,7 @@ export default function EditThesis({
           setError(null);
           setEditing(true);
         }}
-        className="text-xs text-white/30 transition-colors hover:text-pulse"
+        className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-white/70 transition-colors hover:border-pulse/30 hover:bg-white/[0.08] hover:text-pulse"
       >
         Edit thesis
       </button>
@@ -44,7 +44,7 @@ export default function EditThesis({
         onChange={(e) => setValue(e.target.value)}
         className="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none transition-colors focus:border-pulse/50"
       />
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex items-center gap-2 text-sm">
         <button
           type="button"
           disabled={pending}
@@ -58,7 +58,7 @@ export default function EditThesis({
               }
             })
           }
-          className="clay-pulse rounded-full px-3 py-1 font-semibold text-black disabled:opacity-50"
+          className="clay-pulse rounded-lg px-4 py-1.5 font-semibold text-black disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save"}
         </button>
@@ -66,7 +66,7 @@ export default function EditThesis({
           type="button"
           disabled={pending}
           onClick={() => setEditing(false)}
-          className="rounded-full border border-white/15 px-3 py-1 text-white/60 hover:text-white"
+          className="rounded-lg border border-white/15 px-4 py-1.5 font-medium text-white/60 hover:text-white"
         >
           Cancel
         </button>

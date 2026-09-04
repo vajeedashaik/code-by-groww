@@ -207,13 +207,15 @@ export default async function WatchlistPage() {
                       <p className="mt-1.5">
                         <DiffLine symbol={item.symbol} />
                       </p>
-                      <TimeMachine symbol={item.symbol} />
-                      <StockChartToggle symbol={item.symbol} />
-                      <ManageAlerts
-                        symbol={item.symbol}
-                        companyName={item.company_name}
-                        alerts={alertsBySymbol.get(item.symbol) ?? []}
-                      />
+                      <div className="mt-2.5 flex flex-wrap items-center gap-2">
+                        <StockChartToggle symbol={item.symbol} />
+                        <TimeMachine symbol={item.symbol} />
+                        <ManageAlerts
+                          symbol={item.symbol}
+                          companyName={item.company_name}
+                          alerts={alertsBySymbol.get(item.symbol) ?? []}
+                        />
+                      </div>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <PriceCell

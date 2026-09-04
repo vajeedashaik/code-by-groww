@@ -17,22 +17,26 @@ export default function IntervalChart({ symbol }: { symbol: string }) {
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-1.5">
+      <div className="mb-4 flex items-center justify-center gap-2">
         {RANGES.map((r) => (
           <button
             key={r.label}
             type="button"
             onClick={() => setDays(r.days)}
             className={cn(
-              "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-              days === r.days ? "clay-pulse text-black" : "text-white/45 hover:bg-white/5 hover:text-white/80",
+              "rounded-lg border px-4 py-2 text-sm font-semibold transition-colors",
+              days === r.days
+                ? "clay-pulse border-transparent text-black"
+                : "border-white/10 bg-white/[0.04] text-white/60 hover:border-white/20 hover:bg-white/[0.08] hover:text-white",
             )}
           >
             {r.label}
           </button>
         ))}
       </div>
-      <CandlestickChart key={days} symbol={symbol} days={days} height={340} />
+      <div className="mx-auto w-full max-w-3xl">
+        <CandlestickChart key={days} symbol={symbol} days={days} height={420} />
+      </div>
     </div>
   );
 }

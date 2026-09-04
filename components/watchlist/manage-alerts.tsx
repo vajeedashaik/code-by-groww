@@ -46,11 +46,11 @@ export default function ManageAlerts({
   }
 
   return (
-    <div className="mt-1.5">
+    <div>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="text-xs text-white/35 transition-colors hover:text-pulse"
+        className="rounded-lg border border-white/10 bg-white/[0.04] px-3 py-1.5 text-sm font-medium text-white/70 transition-colors hover:border-pulse/30 hover:bg-white/[0.08] hover:text-pulse"
       >
         {open ? "Hide alerts" : "Alerts"}
         {activeCount > 0 && (
@@ -125,7 +125,7 @@ export default function ManageAlerts({
               type="button"
               disabled={pending || !threshold}
               onClick={submit}
-              className="clay-pulse rounded-lg px-2.5 py-1.5 text-xs font-semibold text-black disabled:opacity-50"
+              className="clay-pulse rounded-lg px-3 py-1.5 text-sm font-semibold text-black disabled:opacity-50"
             >
               {pending ? "Saving…" : "Set"}
             </button>
