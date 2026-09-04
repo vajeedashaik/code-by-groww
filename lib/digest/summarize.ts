@@ -48,14 +48,22 @@ export function bucketDiffs(
     } else if (diff.bucket === "Routine") {
       result.routine.push(entry);
     } else {
-      // A non-first-view diff with no bucket means the diffs API failed to
-      // merge Phase 5's scoring fields onto this symbol — an upstream
-      // contract violation, not a normal state. Fall back to Routine
-      // (never silently drop a stock from the digest) and log loudly so
-      // the underlying bug is visible instead of invisible.
-      console.error(
-        `[bucketDiffs] non-first-view diff for ${item.symbol} has no bucket — falling back to Routine`,
-      );
+      // A non-first-view diff with no bucket can mean one of two things:
+      // (1) currentSnapshotId is null — no market_snapshots row exists yet
+      //     for this symbol, so computeAndPersistScores correctly had
+      //     nothing to score. This is a normal, routine data state, not a
+      //     bug — no need to log.
+      // (2) currentSnapshotId is set but bucket is still missing — the
+      //     diffs API genuinely failed to merge Phase 5's scoring fields
+      //     even though there WAS something to score. That's a real
+      //     upstream contract violation, worth logging loudly.
+      // Either way, never silently drop the stock from the digest —
+      // fall back to Routine so it stays visible.
+      if (diff.currentSnapshotId !== null) {
+        console.error(
+          `[bucketDiffs] non-first-view diff for ${item.symbol} has a snapshot but no bucket — falling back to Routine`,
+        );
+      }
       result.routine.push(entry);
     }
   }
