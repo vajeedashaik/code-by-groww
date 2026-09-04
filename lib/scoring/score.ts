@@ -29,8 +29,11 @@ export interface MeaningfulnessInput {
   priceDeltaPct: number;
   volumeNow: number | null;
   volumeAvgRecent: number | null;
+  /** Null when fewer than 20 days of daily_history exist for this symbol. */
   dailyVolPct: number | null;
+  /** Null only if the market benchmark itself has no usable data. */
   marketDeltaPct: number | null;
+  /** Null when the symbol has no sector mapping, or the sector has no usable data. */
   sectorDeltaPct: number | null;
   sectorName: string | null;
 }
@@ -42,6 +45,7 @@ export interface MeaningfulnessResult {
   explanation: Explanation;
 }
 
+/** Named, tunable weights — phase5.md task 6/manual step 2 is adjusting these. */
 export const SCORE_WEIGHTS = {
   priceAnomaly: 0.4,
   volumeAnomaly: 0.2,
@@ -49,6 +53,7 @@ export const SCORE_WEIGHTS = {
   sectorRelative: 0.2,
 } as const;
 
+/** Named, tunable bucket thresholds — phase5.md manual step 3. Raw scale, not rescaled to 0-100. */
 export const BUCKET_THRESHOLDS = {
   urgent: 2.0,
   notable: 0.8,
@@ -69,6 +74,7 @@ export function computeMeaningfulness(
 
   const volatilityAvailable = dailyVolPct !== null && dailyVolPct > 0;
 
+  // Fallback (task 3): no volatility -> use raw % change directly, never divide by zero.
   const priceZScore = volatilityAvailable
     ? priceDeltaPct / dailyVolPct
     : priceDeltaPct;
@@ -91,6 +97,7 @@ export function computeMeaningfulness(
     volumeNow !== null && volumeAvgRecent !== null && volumeAvgRecent > 0
       ? volumeNow / volumeAvgRecent
       : null;
+  // Only rewards volume SURGES — never penalizes below-average volume.
   const volumeComponent = volumeRatio !== null ? Math.max(0, volumeRatio - 1) : 0;
 
   const score =
