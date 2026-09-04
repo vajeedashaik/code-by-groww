@@ -184,3 +184,39 @@ export async function markWatchlistSeen(): Promise<ActionResult> {
   }
   return { ok: true };
 }
+
+/**
+ * Edit an existing watchlist item's thesis text (phase7.md task 5 — this UI
+ * affordance never existed before Phase 7). User-scoped update, defense in
+ * depth same as removeWatchlistItem. Does NOT touch change_events — past
+ * verdicts stay historically accurate to whatever thesis text existed when
+ * they were assessed; only a *future* change event will see the new text,
+ * since the diffs route reads watchlist_items.thesis fresh on every call.
+ */
+export async function updateWatchlistThesis(
+  id: string,
+  thesis: string,
+): Promise<ActionResult> {
+  const { userId } = await auth();
+  if (!userId) return { ok: false, message: "You must be signed in." };
+  if (!id) return { ok: false, message: "Nothing to update." };
+
+  const supabase = createServerSupabaseClient();
+  const { data, error } = await supabase
+    .from("watchlist_items")
+    .update({ thesis: thesis.trim() || null })
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (error) {
+    return { ok: false, message: "Couldn't update your thesis. Try again." };
+  }
+  if (!data || data.length === 0) {
+    return { ok: false, message: "That item is no longer in your watchlist." };
+  }
+
+  revalidatePath("/watchlist");
+  revalidatePath("/dashboard");
+  return { ok: true, message: "Thesis updated." };
+}
