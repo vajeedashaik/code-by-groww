@@ -78,7 +78,17 @@ as a maintenance footgun for whoever touches `digest-view.tsx` next.
 ### Phase 6 manual steps outstanding (from phase6.md's "MANUAL STEPS")
 
 - [ ] Look at the digest with real test data and judge honestly: does it
-  feel calm and useful, or still like a noisy dashboard?
+  feel calm and useful, or still like a noisy dashboard? **Specifically
+  check the color question flagged in Phase 6's final holistic review**:
+  `StockCard`, `RoutineLine`, and `BucketSection` each independently reuse
+  `DiffLine`'s green/red price-direction coloring plus their own
+  red-700/amber-700 header tones, so a mixed watchlist may render 4+ hue
+  families at once — possibly recreating the "red/green anxiety-inducing
+  ticker" phase6.md explicitly warned against, especially since Routine
+  rows (meant to carry less visual weight) still get full-saturation
+  green/red. If it feels noisy, consider muting Routine's price color to
+  gray and/or softening the bucket-header tones so color reads as a single
+  intentional signal, not competing alarms.
 - [ ] Manually tune `lib/digest/interpret.ts`'s template rules against a
   handful of real `change_events` — read them out loud, rewrite anything
   that doesn't sound like a sharp human analyst.
@@ -768,12 +778,13 @@ Phase 6's design/plan docs live in `docs/superpowers/specs/` and
 + orchestration + wiring + review-fix commits), oldest first, after
 `fe0ee02`: `a6c302e`, `4dc7cc6`, `8a8942d`, `9f9e8bb`, `89f2fba`, `86482ff`,
 `947f583`, `cfce083`, `fa4a356`, `b22ca37`, `1a2cf09`, `76d23a1`, `9085fe9`,
-`4a2e3a0`, `d144398`, `f20ada3`. Then 16 more for Phase 6 (spec/plan docs +
+`4a2e3a0`, `d144398`, `f20ada3`. Then 15 more for Phase 6 (spec/plan docs +
 hook export + pure lib/digest modules + verification script + component
 tree + route rewrite), oldest first, after `7ed5c5f`: `c7b3a9f`, `2314845`,
 `3646fb7`, `aea8362`, `3965683`, `d7c36ef`, `d0cbf83`, `7412c82`, `7875b11`,
-`5c4cf7e`, `3814d7c`, `ce580f9`, `bb69ccf`, `27ba17a`, `612c40d` — see the
-Phase 5/6 sections above for what each does; full messages via
+`5c4cf7e`, `3814d7c`, `ce580f9`, `bb69ccf`, `27ba17a`, `612c40d`, plus a
+final holistic-review doc/log-message fix commit — see the Phase 5/6
+sections above for what each does; full messages via
 `git log --oneline fe0ee02..HEAD`.
 
 ## How to continue
