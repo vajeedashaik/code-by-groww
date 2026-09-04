@@ -28,6 +28,13 @@ function volumesOf(bars: HistoryBar[]): (number | null)[] {
  * Skips: first-view diffs (nothing to score yet, phase5.md task 7) and any
  * diff with no currentSnapshotId (no snapshot exists yet to key the upsert
  * on).
+ *
+ * Note: if the change_events upsert fails, this still returns the in-memory
+ * computed scores (logged, not thrown) — a caller should not assume a score
+ * in the returned Map was durably persisted. Also: any single diff whose
+ * inputs cause computeMeaningfulness to throw (non-finite data) is logged
+ * and skipped, not fatal to the batch — same partial-failure contract as
+ * the Inngest snapshot/history jobs.
  */
 export async function computeAndPersistScores(
   supabase: SupabaseClient<Database>,
@@ -68,38 +75,46 @@ export async function computeAndPersistScores(
   const rows: Database["public"]["Tables"]["change_events"]["Insert"][] = [];
 
   for (const diff of scorable) {
-    const bars = historyBySymbol.get(diff.symbol) ?? [];
-    const dailyVolPct = computeVolatilityPct(closesOf(bars));
-    const volumeAvgRecent = computeAverageVolume(volumesOf(bars));
-    const sectorName = lookupSector(diff.symbol);
-    const sectorDeltaPct = sectorName
-      ? (sectorDeltaBySector.get(sectorName) ?? null)
-      : null;
+    try {
+      const bars = historyBySymbol.get(diff.symbol) ?? [];
+      const dailyVolPct = computeVolatilityPct(closesOf(bars));
+      const volumeAvgRecent = computeAverageVolume(volumesOf(bars));
+      const sectorName = lookupSector(diff.symbol);
+      const sectorDeltaPct = sectorName
+        ? (sectorDeltaBySector.get(sectorName) ?? null)
+        : null;
 
-    const result = computeMeaningfulness({
-      priceDeltaPct: diff.priceDeltaPct,
-      volumeNow: diff.volumeNow,
-      volumeAvgRecent,
-      dailyVolPct,
-      marketDeltaPct,
-      sectorDeltaPct,
-      sectorName,
-    });
+      const result = computeMeaningfulness({
+        priceDeltaPct: diff.priceDeltaPct,
+        volumeNow: diff.volumeNow,
+        volumeAvgRecent,
+        dailyVolPct,
+        marketDeltaPct,
+        sectorDeltaPct,
+        sectorName,
+      });
 
-    results.set(diff.symbol, result);
-    rows.push({
-      user_id: userId,
-      symbol: diff.symbol,
-      snapshot_id: diff.currentSnapshotId,
-      meaningfulness_score: result.score,
-      magnitude: diff.priceDeltaPct,
-      confidence: result.confidence,
-      // Explanation is a concrete interface (no index signature), while the
-      // generated Insert type expects the generic Json union — the shapes
-      // are structurally compatible (plain data, no functions/undefined),
-      // so this is a safe representational cast, not a behavior change.
-      explanation: result.explanation as unknown as Json,
-    });
+      results.set(diff.symbol, result);
+      rows.push({
+        user_id: userId,
+        symbol: diff.symbol,
+        snapshot_id: diff.currentSnapshotId,
+        meaningfulness_score: result.score,
+        magnitude: diff.priceDeltaPct,
+        confidence: result.confidence,
+        // Explanation is a concrete interface (no index signature), while the
+        // generated Insert type expects the generic Json union — the shapes
+        // are structurally compatible (plain data, no functions/undefined),
+        // so this is a safe representational cast, not a behavior change.
+        explanation: result.explanation as unknown as Json,
+      });
+    } catch (err) {
+      // One symbol's bad/non-finite data must not take down every other
+      // symbol's score — same "log and skip, never fatal" contract as
+      // snapshot-ingest.ts / daily-history-backfill.ts.
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[computeAndPersistScores] skipped ${diff.symbol}: ${message}`);
+    }
   }
 
   if (rows.length > 0) {
