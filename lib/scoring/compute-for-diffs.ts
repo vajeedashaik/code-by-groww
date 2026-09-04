@@ -10,12 +10,29 @@ import { loadRecentHistory, type HistoryBar } from "@/lib/scoring/history";
 import { computeVolatilityPct, computeAverageVolume } from "@/lib/scoring/volatility";
 import { computeDailyMovePct, computeSectorBenchmarkPct } from "@/lib/scoring/benchmarks";
 import { computeMeaningfulness, type MeaningfulnessResult } from "@/lib/scoring/score";
+import type { ThesisSignal } from "@/lib/thesis/types";
 
 function closesOf(bars: HistoryBar[]): number[] {
   return bars.map((b) => b.close);
 }
 function volumesOf(bars: HistoryBar[]): (number | null)[] {
   return bars.map((b) => b.volume);
+}
+
+/** Minimal view of a stored ThesisAnalysis — just what the digest UI needs to render. */
+export interface ThesisAnalysisSummary {
+  summary: string;
+  signals: ThesisSignal[];
+}
+
+/** MeaningfulnessResult plus the change_events row identity and Phase 7 thesis state the diffs route needs. */
+export interface ScoreWithMeta extends MeaningfulnessResult {
+  /** null when the upsert failed or this diff had nothing to score — never eligible for a thesis check. */
+  changeEventId: string | null;
+  /** The change event's current thesis_verdict. null until Phase 7's Inngest job sets it. */
+  thesisVerdict: string | null;
+  /** null until a verdict has been persisted for this change event. */
+  thesisAnalysis: ThesisAnalysisSummary | null;
 }
 
 /**
@@ -25,23 +42,29 @@ function volumesOf(bars: HistoryBar[]): (number | null)[] {
  * change (Phase 5 design decision). Returns a Map so the diffs route can
  * merge results into its response without a second DB read.
  *
- * Skips: first-view diffs (nothing to score yet, phase5.md task 7) and any
- * diff with no currentSnapshotId (no snapshot exists yet to key the upsert
- * on).
+ * Phase 7: this function runs on every diffs fetch, including the client's
+ * thesis-verdict poll (see diff-panel.tsx). Re-upserting `explanation` with
+ * only the Phase 5 fields would silently erase any `thesis_analysis` the
+ * thesis-relevance Inngest job already wrote into that same jsonb column —
+ * so existing rows for the exact (symbol, snapshot_id) pairs being upserted
+ * are read first, and any existing `thesis_analysis` is carried forward into
+ * the new explanation object before writing. The upsert's own `.select()`
+ * then returns that preserved value straight back, so ScoreWithMeta.
+ * thesisAnalysis always reflects current DB state without a second read.
  *
  * Note: if the change_events upsert fails, this still returns the in-memory
  * computed scores (logged, not thrown) — a caller should not assume a score
- * in the returned Map was durably persisted. Also: any single diff whose
- * inputs cause computeMeaningfulness to throw (non-finite data) is logged
- * and skipped, not fatal to the batch — same partial-failure contract as
- * the Inngest snapshot/history jobs.
+ * in the returned Map was durably persisted (changeEventId will be null in
+ * that case). Also: any single diff whose inputs cause computeMeaningfulness
+ * to throw (non-finite data) is logged and skipped, not fatal to the batch —
+ * same partial-failure contract as the Inngest snapshot/history jobs.
  */
 export async function computeAndPersistScores(
   supabase: SupabaseClient<Database>,
   userId: string,
   diffs: SymbolDiff[],
-): Promise<Map<string, MeaningfulnessResult>> {
-  const results = new Map<string, MeaningfulnessResult>();
+): Promise<Map<string, ScoreWithMeta>> {
+  const results = new Map<string, ScoreWithMeta>();
 
   const scorable = diffs.filter(
     (d): d is SymbolDiff & { currentSnapshotId: string; priceDeltaPct: number } =>
@@ -72,6 +95,26 @@ export async function computeAndPersistScores(
     sectorDeltaBySector.set(sector, computeSectorBenchmarkPct(memberCloses));
   }
 
+  // Pre-fetch existing rows for the exact (symbol, snapshot_id) pairs about
+  // to be upserted, so any Phase 7 thesis_analysis already written isn't
+  // clobbered by this call's Phase 5 explanation write (see doc comment).
+  const existingExplanationByKey = new Map<string, Json>();
+  const snapshotIds = [...new Set(scorable.map((d) => d.currentSnapshotId))];
+  const { data: existingRows, error: existingError } = await supabase
+    .from("change_events")
+    .select("symbol, snapshot_id, explanation")
+    .eq("user_id", userId)
+    .in("symbol", symbols)
+    .in("snapshot_id", snapshotIds);
+  if (existingError) {
+    console.error(`[computeAndPersistScores] existing-rows query failed: ${existingError.message}`);
+  }
+  for (const row of existingRows ?? []) {
+    if (row.snapshot_id && row.explanation) {
+      existingExplanationByKey.set(`${row.symbol}:${row.snapshot_id}`, row.explanation);
+    }
+  }
+
   const rows: Database["public"]["Tables"]["change_events"]["Insert"][] = [];
 
   for (const diff of scorable) {
@@ -94,7 +137,27 @@ export async function computeAndPersistScores(
         sectorName,
       });
 
-      results.set(diff.symbol, result);
+      results.set(diff.symbol, {
+        ...result,
+        changeEventId: null,
+        thesisVerdict: null,
+        thesisAnalysis: null,
+      });
+
+      const existingExplanation = existingExplanationByKey.get(`${diff.symbol}:${diff.currentSnapshotId}`);
+      const existingThesisAnalysis =
+        existingExplanation && typeof existingExplanation === "object" && !Array.isArray(existingExplanation)
+          ? (existingExplanation as Record<string, Json | undefined>).thesis_analysis
+          : undefined;
+
+      const explanation: Json =
+        existingThesisAnalysis !== undefined
+          ? ({
+              ...(result.explanation as unknown as Record<string, Json>),
+              thesis_analysis: existingThesisAnalysis,
+            } as Json)
+          : (result.explanation as unknown as Json);
+
       rows.push({
         user_id: userId,
         symbol: diff.symbol,
@@ -102,11 +165,7 @@ export async function computeAndPersistScores(
         meaningfulness_score: result.score,
         magnitude: diff.priceDeltaPct,
         confidence: result.confidence,
-        // Explanation is a concrete interface (no index signature), while the
-        // generated Insert type expects the generic Json union — the shapes
-        // are structurally compatible (plain data, no functions/undefined),
-        // so this is a safe representational cast, not a behavior change.
-        explanation: result.explanation as unknown as Json,
+        explanation,
       });
     } catch (err) {
       // One symbol's bad/non-finite data must not take down every other
@@ -118,11 +177,35 @@ export async function computeAndPersistScores(
   }
 
   if (rows.length > 0) {
-    const { error } = await supabase
+    const { data: upserted, error } = await supabase
       .from("change_events")
-      .upsert(rows, { onConflict: "user_id,symbol,snapshot_id" });
+      .upsert(rows, { onConflict: "user_id,symbol,snapshot_id" })
+      .select("id, symbol, thesis_verdict, explanation");
     if (error) {
       console.error(`[computeAndPersistScores] change_events upsert failed: ${error.message}`);
+    }
+    for (const row of upserted ?? []) {
+      const existing = results.get(row.symbol);
+      if (!existing) continue;
+
+      let thesisAnalysis: ThesisAnalysisSummary | null = null;
+      if (row.explanation && typeof row.explanation === "object" && !Array.isArray(row.explanation)) {
+        const ta = (row.explanation as Record<string, unknown>).thesis_analysis;
+        if (ta && typeof ta === "object") {
+          const t = ta as Record<string, unknown>;
+          thesisAnalysis = {
+            summary: typeof t.summary === "string" ? t.summary : "",
+            signals: Array.isArray(t.signals) ? (t.signals as ThesisSignal[]) : [],
+          };
+        }
+      }
+
+      results.set(row.symbol, {
+        ...existing,
+        changeEventId: row.id,
+        thesisVerdict: row.thesis_verdict,
+        thesisAnalysis,
+      });
     }
   }
 
