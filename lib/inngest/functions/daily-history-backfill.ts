@@ -1,11 +1,12 @@
 import { inngest } from "@/lib/inngest/client";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { getDailyHistory, MarketDataError } from "@/lib/market-data";
+import type { DailyBar } from "@/lib/market-data";
 import { chunk, loadWatchlistSymbols } from "@/lib/inngest/functions/shared";
 
 /**
  * Daily history backfill. Runs once a day at 01:30 UTC (and on the
- * market/history.requested event). Fetches ~45 calendar days of daily closes
+ * market/history.requested event). Fetches ~60 calendar days of daily closes
  * per watchlisted symbol and upserts them into daily_history — Phase 5's
  * volatility and sector-benchmark math reads from that table, so it needs real
  * multi-day data now.
@@ -19,14 +20,8 @@ import { chunk, loadWatchlistSymbols } from "@/lib/inngest/functions/shared";
  */
 
 const CHUNK_SIZE = 5;
-const HISTORY_DAYS = 45;
-
-interface HistoryRow {
-  symbol: string;
-  date: string;
-  close: number;
-  volume: number | null;
-}
+// yahoo drops weekends/holidays (~77% yield observed) -> ~45 trading days from 60 calendar days
+const HISTORY_DAYS = 60;
 
 interface Failure {
   symbol: string;
@@ -50,28 +45,21 @@ export const dailyHistoryBackfill = inngest.createFunction(
     }
 
     const chunks = chunk(symbols, CHUNK_SIZE);
-    const allRows: HistoryRow[] = [];
+    const allRows: DailyBar[] = [];
     const allFailures: Failure[] = [];
 
     for (let i = 0; i < chunks.length; i++) {
       const { rows, failures } = await step.run(
         `fetch-chunk-${i}`,
         async () => {
-          const rowsOut: HistoryRow[] = [];
+          const rowsOut: DailyBar[] = [];
           const failOut: Failure[] = [];
 
           await Promise.all(
             chunks[i].map(async (symbol) => {
               try {
                 const bars = await getDailyHistory(symbol, HISTORY_DAYS);
-                for (const b of bars) {
-                  rowsOut.push({
-                    symbol: b.symbol,
-                    date: b.date,
-                    close: b.close,
-                    volume: b.volume,
-                  });
-                }
+                rowsOut.push(...bars);
               } catch (err) {
                 const e =
                   err instanceof MarketDataError
