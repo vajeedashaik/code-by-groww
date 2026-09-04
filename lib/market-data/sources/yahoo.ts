@@ -33,20 +33,29 @@ function withTimeout<T>(
   symbol: string,
   source: string,
 ): Promise<T> {
-  return Promise.race([
-    work,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new MarketDataError("TIMEOUT", symbol, source)),
-        TIMEOUT_MS,
-      ),
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new MarketDataError("TIMEOUT", symbol, source)),
+      TIMEOUT_MS,
+    );
+    // Don't let a pending timeout hold the event loop open / delay an Inngest
+    // step return once `work` has already settled.
+    timer.unref?.();
+  });
+  return Promise.race([work, timeout]).finally(() => clearTimeout(timer));
 }
 
 function toMarketDataError(err: unknown, symbol: string): MarketDataError {
   if (err instanceof MarketDataError) return err;
   const msg = err instanceof Error ? err.message : String(err);
+  // Yahoo is the primary source hit for every symbol every cycle — a 429 must
+  // stay distinguishable, not collapse into SOURCE_ERROR.
+  if (/429|too many requests|rate limit/i.test(msg)) {
+    return new MarketDataError("RATE_LIMIT", symbol, "yahoo", msg, {
+      cause: err,
+    });
+  }
   if (/not found|404|no data|delisted/i.test(msg)) {
     return new MarketDataError("NOT_FOUND", symbol, "yahoo", msg, { cause: err });
   }
@@ -72,7 +81,7 @@ export const yahooSource: MarketDataSource = {
       const volume =
         typeof q.regularMarketVolume === "number" ? q.regularMarketVolume : null;
       return {
-        symbol: symbol.toUpperCase(),
+        symbol: symbol.trim().toUpperCase(),
         price,
         volume,
         source: "yahoo",
@@ -84,6 +93,7 @@ export const yahooSource: MarketDataSource = {
   },
 
   async getDailyHistory(symbol: string, days: number): Promise<DailyBar[]> {
+    const normSymbol = symbol.trim().toUpperCase();
     const period1 = new Date();
     period1.setDate(period1.getDate() - days);
     try {
@@ -100,11 +110,18 @@ export const yahooSource: MarketDataSource = {
             Number.isFinite(r.close),
         )
         .map((r) => ({
-          symbol: symbol.toUpperCase(),
+          symbol: normSymbol,
           date: r.date.toISOString().slice(0, 10),
           close: r.close,
           volume: typeof r.volume === "number" ? r.volume : null,
         }));
+      // Drop the in-progress bar: while the market is open Yahoo appends a
+      // today-dated row whose `close` is the current intraday price. Task 10
+      // would otherwise persist that as the day's official close.
+      const today = new Date().toISOString().slice(0, 10);
+      if (rows.length > 0 && rows[rows.length - 1].date === today) {
+        rows.pop();
+      }
       if (rows.length === 0) {
         throw new MarketDataError("NOT_FOUND", symbol, "yahoo", "no history");
       }
