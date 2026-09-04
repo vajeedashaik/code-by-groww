@@ -74,6 +74,32 @@ phases.
     project, exercising real Yahoo Finance data and the exact partial-failure
     path required by acceptance test 3.
 
+### Final holistic review (whole-phase, after all 15 tasks)
+
+A last cross-file review (beyond the per-task spec/quality reviews already
+folded into the sections above) checked contract consistency across every
+consumer, that the `lib/market-data` isolation boundary genuinely holds
+(grepped the whole tree for `yahoo-finance2`/`finnhub.io` outside
+`lib/market-data/sources/` — clean), naming/style parity between the two
+Inngest jobs, and secrets handling. Result: **no Critical or Important
+findings — recommended ready to hand back as "Phase 3 complete."** One Minor
+was fixed immediately: both job files (`snapshot-ingest.ts`,
+`daily-history-backfill.ts`) were missing the `import "server-only";` guard
+that every other secret-touching file in the phase has; added in commit
+`d3c02f9`. Three remaining Minors, left as documented follow-ups (none block
+a demo, none read live yet):
+- `decay-existing` dedupes by `symbol` only, so when a US symbol has two
+  same-`fetched_at` rows (yahoo + finnhub), only one gets its `status`
+  corrected per pass — harmless while nothing reads `status` live.
+- `getQuote` (single-best-answer facade function) has no current caller —
+  intentional per the plan's 3-function facade design, kept for a plausible
+  future use (e.g. an instant price on the add-stock flow), not dead-code
+  debris.
+- `classifyStaleness`/`MarketSnapshotStatus` are imported directly from
+  `lib/market-data/staleness.ts` rather than through the `index.ts` barrel —
+  both are inside the isolation boundary, so this is a discoverability nit,
+  not a boundary break.
+
 **Phase 3 acceptance tests (from README) — status:**
 
 | # | Test | Status |
@@ -311,11 +337,40 @@ provider in Supabase and paste the Clerk domain. See README steps 3–4.
 
 ## Git
 
+All work so far is on `master` (no feature branches, no remote configured).
+16 commits from Phase 1 through Phase 3, oldest first:
+
 - `3d41835` docs: Phase 1 foundation design spec
 - `4f8ea2b` feat: Phase 1 foundation scaffold
+- `8ae5cc4` docs: Phase 3 market data pipeline design spec
+- `a0a989e` docs: Phase 3 market data implementation plan
+- `002a701` feat: Phase 2 watchlist CRUD + stock search
+- `cef79f0` chore: add yahoo-finance2 + inngest, scaffold inngest serve route
+- `7fe1906` feat: market-data adapter types
+- `da6b4b2` feat: classifyStaleness snapshot freshness grader
+- `2a818ce` feat: yahoo-finance2 market-data source (quotes + daily history)
+- `59ea95c` feat: finnhub secondary market-data source (US quotes only)
+- `c327e12` feat: market-data facade (getQuote / getAllQuotes / getDailyHistory)
+- `9986a2a` feat: shared inngest job helpers (symbol load, chunk)
+- `0b7c4aa` feat: snapshot-ingest inngest job (5-min cron, partial-failure safe)
+- `7590179` feat: daily-history-backfill inngest job (daily cron, upsert)
+- `7a7f8f5` feat: register snapshot + history jobs on the inngest serve route
+- `b853b66` refactor: bump HISTORY_DAYS to 60, drop redundant HistoryRow type
+- `3de4b90` feat: dev-only auth-gated manual trigger for the market jobs
+- `0c91ac6` feat: PriceCell — price + % change with fetching-price fallback
+- `d3e796a` feat: show live snapshot price + % change on the watchlist page
+- `62e784f` docs: Phase 3 run instructions, acceptance tests, context update
+- `d3c02f9` chore: add server-only guard to both inngest job files (HEAD)
+
+(Phase 3 design/plan docs were written and committed before Phase 2's own
+code was committed — the design/plan work happened first in the session,
+Phase 2 code landed right after. Order above is chronological by commit,
+not by phase number.)
 
 `node_modules/`, `.next/`, `.env*.local` are gitignored. `phase2.md` was
-committed with the scaffold by accident — harmless.
+committed with the scaffold by accident — harmless. `phase3.md` (this
+phase's informal brief) and `phase4.md` (next phase's brief, dropped in by
+the user, not yet reviewed) currently sit **untracked** in the working tree.
 
 ## How to continue
 
