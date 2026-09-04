@@ -129,6 +129,7 @@ export interface Database {
           user_id: string;
           symbol: string;
           detected_at: string;
+          snapshot_id: string | null;
           meaningfulness_score: number | null;
           magnitude: number | null;
           confidence: string | null;
@@ -140,6 +141,7 @@ export interface Database {
           user_id?: string; // defaults to auth.jwt()->>'sub'
           symbol: string;
           detected_at?: string;
+          snapshot_id?: string | null;
           meaningfulness_score?: number | null;
           magnitude?: number | null;
           confidence?: string | null;
@@ -151,13 +153,21 @@ export interface Database {
           user_id?: string;
           symbol?: string;
           detected_at?: string;
+          snapshot_id?: string | null;
           meaningfulness_score?: number | null;
           magnitude?: number | null;
           confidence?: string | null;
           explanation?: Json | null;
           thesis_verdict?: string | null;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: "change_events_snapshot_id_fkey";
+            columns: ["snapshot_id"];
+            referencedRelation: "market_snapshots";
+            referencedColumns: ["id"];
+          },
+        ];
       };
     };
     Views: Record<never, never>;

@@ -1,5 +1,5 @@
 -- ===========================================================================
--- Smart Market Watchlist — full schema (Phase 1 + Phase 2)
+-- Smart Market Watchlist — full schema (Phase 1 + Phase 2 + Phase 5)
 -- Reference dump. This is 0001_init.sql + 0002_rls.sql + 0003_*.sql concatenated.
 -- Apply the numbered files in supabase/migrations/ in order instead of this
 -- file when setting up a fresh project.
@@ -52,11 +52,13 @@ create table if not exists public.change_events (
   user_id              text not null default (auth.jwt() ->> 'sub'),
   symbol               text not null,
   detected_at          timestamptz not null default now(),
+  snapshot_id          uuid references public.market_snapshots (id),  -- Phase 5: dedup key
   meaningfulness_score numeric,
   magnitude            numeric,
   confidence           text,
   explanation          jsonb,
-  thesis_verdict       text
+  thesis_verdict       text,
+  unique (user_id, symbol, snapshot_id)
 );
 
 -- --------------------------------------------------------------------------
