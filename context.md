@@ -8,7 +8,152 @@ Smart market watchlist web app. 72-hour solo hackathon, 9 phases.
 
 **Stack:** Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk (auth) · Supabase (Postgres + RLS) · Inngest (scheduled jobs) · yahoo-finance2 + Finnhub (market data).
 
-**Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4–9 (seen-state/diffing, scoring, digest, thesis, …).
+**Phase plan:** 1 Foundation → 2 Watchlist CRUD → 3 Market Data Pipeline → 4
+Seen-State/Diffing → 5 Meaningfulness Engine → 6 Digest UI → 7 Thesis + AI
+Relevance → 8–9 (resilience/staleness, …).
+
+## Current state — Phase 7: Personal Thesis + AI Relevance Check (BUILT, pending browser/manual verification)
+
+For any flagged (Urgent/Notable) stock with a user-provided thesis, one
+Gemini call (via Inngest `step.ai.infer`, Gemini's native structured JSON
+output) judges whether recent Finnhub news supports/contradicts/doesn't
+affect the thesis. This is the one place AI touches the product — fully
+separate from Phase 5's deterministic score (never merged into
+`meaningfulness_score`/`bucket`). Built directly (not via
+`subagent-driven-development`'s per-task subagent dispatch — the
+fully-specified implementation plan made re-deriving each task via a fresh
+subagent redundant; instead implemented directly against the plan, then one
+comprehensive `superpowers:code-reviewer` pass against the whole diff at the
+end, same as that skill's own final step). Full design:
+`docs/superpowers/specs/2026-09-04-phase7-thesis-relevance-design.md`; full
+plan: `docs/superpowers/plans/2026-09-04-phase7-thesis-relevance.md`.
+
+### What is built (Phase 7)
+
+| Area | Files |
+| --- | --- |
+| Types | `lib/thesis/types.ts` — `ThesisVerdictCategory`, `ThesisSignal`, `ThesisAnalysis` (stored shape), `ThesisField` (API/UI shape), `NewsArticle` |
+| Defensive parser | `lib/thesis/parse-verdict.ts` — `parseVerdictResponse()`: never throws, any missing/malformed field degrades to `"unavailable"` |
+| Cost-control selection | `lib/thesis/trigger.ts` — `selectThesisChecksToRun()`: Urgent/Notable only, non-empty thesis, not yet assessed, score-priority, capped at 5 |
+| Prompt + structured output | `lib/thesis/prompt.ts` — `buildThesisPrompt()`: pure builder, uses Gemini's native `responseMimeType: "application/json"` + `responseSchema` rather than prompt-only JSON enforcement |
+| News fetch | `lib/news/finnhub-news.ts` — `getCompanyNews()`: Finnhub `/company-news`, last 5 days, capped at 5 articles, returns `[]` (not an error) when nothing found |
+| Inngest function | `lib/inngest/functions/thesis-relevance.ts` — `thesisRelevance`, event `thesis/relevance.requested`: re-checks not-already-assessed (belt-and-suspenders alongside the route's own check + Inngest's event-id dedup), fetches news, calls Gemini, parses defensively, persists `thesis_verdict` + `explanation.thesis_analysis`; any error (bad key, quota, timeout) degrades to a stored `"unavailable"` verdict instead of crashing or retrying forever |
+| Scoring pipeline fix | `lib/scoring/compute-for-diffs.ts` — rewritten so a `(symbol, snapshot_id)` pair that already has a `change_events` row is read back and reused as-is, **never** recomputed/rewritten (see Critical fix below); `lib/scoring/score.ts` gained an exported `deriveBucket()` so the reuse path can classify a persisted score without re-running `computeMeaningfulness` |
+| Wiring | `app/api/watchlist/diffs/route.ts` — selects `thesis`/`company_name`, builds candidates, fires capped/idempotent Inngest events (`id: ${userId}:${symbol}:${changeEventId}`), merges a `thesis` field into each diff; `lib/watchlist/scored-diff.ts` gained the `thesis?: ThesisField \| null` field; `app/api/inngest/route.ts` registers the new function |
+| Live update | `components/watchlist/diff-panel.tsx` — polls every 5s (60s safety cutoff) while any thesis is unassessed; a poll merges only the `thesis` field onto the already-rendered diff (see Critical fix below), never re-fires `markWatchlistSeen()` |
+| Digest UI | `components/digest/stock-card.tsx` — "Your thesis: …" + status line (Mostly intact/Contradicted/Unclear/No new information/Unavailable/Checking…); `components/digest/why-flagged-detail.tsx` — adds a "Thesis analysis" subsection with per-signal reasoning when present |
+| Edit thesis | `components/watchlist/edit-thesis.tsx` (inline expand-to-edit, mirrors `remove-stock-button.tsx`'s pattern) + `updateWatchlistThesis()` server action in `actions.ts` (touches only `watchlist_items`, never `change_events` — past verdicts stay historically accurate) + wired into `app/(protected)/watchlist/page.tsx` |
+| Verification script | `scripts/verify-thesis.ts` (`npm run verify:thesis`) — 20 checks: all `parseVerdictResponse` edge cases, all `selectThesisChecksToRun` filter/cap/priority rules, `buildThesisPrompt` shape/content checks |
+
+### Critical fix found by final code review (fixed before declaring done)
+
+A `superpowers:code-reviewer` pass against the whole diff caught a real bug
+the design doc's own stated concern (thesis_analysis getting wiped by a
+poll) didn't fully cover: `markWatchlistSeen()` advances the seen pointer to
+the just-shown snapshot immediately after the first digest fetch. The 5s
+thesis-status poll then re-ran the old `computeAndPersistScores`, which saw
+`then === current` for that symbol (0% delta), recomputed a near-zero score,
+and **upserted over the same `change_events` row** — silently demoting an
+Urgent/Notable card to Routine mid-session while the AI verdict was still in
+flight, and corrupting the historical detection record with a phantom
+zero-delta score. This would have failed phase7.md's own acceptance tests 6
+and 9 (which require watching the digest live through the polling window,
+not just checking Supabase after the fact).
+
+**Fix:** `computeAndPersistScores` now reads back any existing
+`change_events` row for a `(symbol, snapshot_id)` pair and reuses it
+untouched — score/bucket/confidence/explanation/thesis state all come
+straight from the persisted row, never recomputed. Only a diff whose current
+snapshot has genuinely never been scored goes through
+`computeMeaningfulness` + upsert. A second, related issue was found during
+self-verification of that fix: even with scores no longer corrupted, a
+poll's raw `SymbolDiff` price/% fields (from `computeDiffsForUser`, not the
+score) still went stale the same way, producing a "0% — no change" price
+line sitting above an interpretation sentence still describing the real
+move. Fixed by having `diff-panel.tsx`'s poll merge only the `thesis` field
+onto the already-rendered diff, leaving price/%/interpretation exactly as
+first shown until a genuine page reload re-derives them.
+
+Two Minor findings also fixed: `stock-card.tsx`'s verdict-label lookup
+tables were `Record<string, string>` (a future `ThesisVerdictCategory`
+change wouldn't fail the build, just silently render blank) — tightened to
+`Record<ThesisVerdictCategory | "pending", string>`. All other reviewed
+areas (cost-control wiring, idempotency, architectural separation from the
+deterministic score, graceful AI-failure degradation, historical
+immutability of thesis edits) were verified correct by reading the actual
+code, not just trusting the plan's description of it.
+
+### Why AI is used here specifically (pitch answer, phase7.md manual step 4)
+
+Every other signal in this product — price/volume anomaly, market/sector
+relativity, bucket/confidence — is deterministic, reproducible, and
+explainable from raw numbers (Phase 5). Thesis relevance is fundamentally
+different: judging whether a news headline "supports" or "contradicts" a
+free-text reason a human wrote is a natural-language reasoning task with no
+formula. Rather than let that fuzziness leak into the trustworthy
+deterministic engine, it's isolated as one narrow, clearly-labeled,
+opt-in-per-stock, cost-capped layer that can degrade to "unavailable"
+without taking anything else down — the deterministic score is never a
+function of what the AI says, in either direction.
+
+### Phase 7 verification
+
+- `npm run typecheck` — exit 0, no output (re-run clean after all fixes).
+- `npm run build` — compiled successfully, 11 routes + middleware, 0 errors.
+- `npm run verify:thesis` — all 20 checks pass.
+- `npm run verify:scoring` — regression check, all 13 checks still pass.
+- `npm run verify:digest` — regression check, all 16 checks still pass.
+- **Browser/manual tests — not yet run.** ALL 9 of phase7.md's TESTING items
+  and its 4 MANUAL STEPS need a real Clerk session, real
+  `GEMINI_API_KEY`/`FINNHUB_API_KEY`, a flagged thesis-bearing stock, and
+  Inngest-dashboard log inspection (tests 2 and 9 specifically verify the
+  de-dup/cap claims by log count, not just by checking Supabase) — none of
+  this is doable headlessly. This is the user's job, same as every prior
+  phase. Given the Critical fix above, tests 6 and 9 (watching the digest
+  live through the ~5-60s polling window) matter more than usual this phase.
+
+### Phase 7 manual steps outstanding (from phase7.md's "MANUAL STEPS")
+
+- [ ] Confirm `GEMINI_API_KEY` is set and working — test with a trivial
+  Inngest AI call first if this integration hasn't been touched before.
+- [ ] Write and iterate on the actual prompt (`lib/thesis/prompt.ts`) —
+  read several real outputs and judge whether the tone sounds like a sharp
+  analyst, not generic AI filler.
+- [ ] Watch Gemini API usage/quota while testing, especially triggering it
+  repeatedly during development.
+- [ ] Have the "why AI is used here" answer ready for demo day (see section
+  above — this is the current answer, refine in your own words if needed).
+
+### Phase 7 deviations from spec
+
+1. **Not built via `subagent-driven-development`'s per-task subagent
+   dispatch** — the implementation plan already contained complete,
+   unambiguous code for all 18 tasks (a deliberate choice at planning time),
+   so tasks were implemented directly and verified after each one, with a
+   single comprehensive `superpowers:code-reviewer` pass at the end
+   (matching that skill's own final step) rather than 54 intermediate
+   implementer+spec-review+quality-review dispatches for entirely mechanical
+   copy-and-verify work.
+2. **`computeAndPersistScores` rewritten beyond the plan's original
+   Task 8 design** — the plan's version merged `thesis_analysis` forward
+   across re-upserts but still re-computed and re-wrote every scorable diff
+   on every call; the final code review caught that this recomputation
+   itself was unsafe (see Critical fix above), so the shipped version never
+   rewrites an already-scored `(symbol, snapshot_id)` row at all.
+3. **`deriveBucket()` extracted from `computeMeaningfulness`** — not in the
+   original plan; needed so the reuse-existing-row path can classify a
+   persisted score without duplicating the threshold logic.
+4. **Client polling merges only the `thesis` field**, not the plan's
+   original "replace the whole diffs map each poll" — a fix found during
+   self-verification of the backend fix (see Critical fix above).
+5. **No new DB migration** — `change_events.thesis_verdict` (Phase 1) and
+   `.explanation` jsonb (Phase 1/5) already covered everything Phase 7
+   needed to store.
+6. **No test runner** — same Phase 2-6 deviation; verification is
+   `tsc`/`build`/`verify:thesis`/`verify:scoring`/`verify:digest` scripts.
+7. **Executed directly on `master`**, same as every prior phase — treated as
+   an established project convention rather than re-confirmed from scratch
+   (6 consecutive prior phases already explicitly confirmed this).
 
 ## Current state — Phase 6: "While You Were Away" Digest UI (BUILT, pending browser/manual verification)
 
@@ -783,8 +928,16 @@ hook export + pure lib/digest modules + verification script + component
 tree + route rewrite), oldest first, after `7ed5c5f`: `c7b3a9f`, `2314845`,
 `3646fb7`, `aea8362`, `3965683`, `d7c36ef`, `d0cbf83`, `7412c82`, `7875b11`,
 `5c4cf7e`, `3814d7c`, `ce580f9`, `bb69ccf`, `27ba17a`, `612c40d`, plus a
-final holistic-review doc/log-message fix commit — see the Phase 5/6
-sections above for what each does; full messages via
+final holistic-review doc/log-message fix commit.
+
+Then 22 commits for Phase 7 (design/plan docs + `lib/thesis`/`lib/news`
+pure modules + verification script + `compute-for-diffs.ts` rewrite +
+Inngest function + route/UI wiring + edit-thesis + two post-review fix
+commits), oldest first, after `4ce2157`: `0f9c5c3`, `4d9a8c5`, `af985b0`,
+`4a5a06b`, `9894b2a`, `d9169cd`, `5258db8`, `bcd253c`, `981baf5`, `ddba73f`,
+`3cfbc1e`, `0f4f1eb`, `bcae533`, `6dbba11`, `07ea132`, `d05f873`, `f99c752`,
+`101d8a5`, `73889ad`, `7955c57`, `5300736`, `1eb1532` — see the Phase 7
+section above for what each does; full messages via
 `git log --oneline fe0ee02..HEAD`.
 
 ## How to continue
@@ -814,6 +967,18 @@ sections above for what each does; full messages via
   headlessly — mixed-bucket data, the zero-change and first-visit states,
   15+ stocks, mobile width, and a cold-read comprehension check) and its
   4 manual steps (judging calm-vs-noisy feel, hand-tuning the
-  interpretation templates, finalizing empty-state copy, screenshots)
-  before starting Phase 7 (Personal Thesis + AI Relevance Check, brief
-  already in `phase7.md`).
+  interpretation templates, finalizing empty-state copy, screenshots).
+- Phase 7 built, typechecking, building, and thesis-verified (see the
+  Phase 7 section above) — flagged + thesis-bearing stocks get one Gemini
+  call judging thesis relevance, shown on the digest card with a "Checking
+  against your thesis…" live-updating state; `/watchlist` gained an inline
+  thesis editor. A real bug (score/bucket corruption from re-scoring an
+  already-scored snapshot during polling) was caught by final code review
+  and fixed — see that section's "Critical fix" writeup before assuming
+  the polling behavior is simple. Run ALL 9 of phase7.md's TESTING items
+  in a browser (needs real `GEMINI_API_KEY`/`FINNHUB_API_KEY`, a flagged
+  thesis-bearing stock, and Inngest-dashboard log inspection for tests 2
+  and 9) and its 4 manual steps (confirming the Gemini key works,
+  iterating on the actual prompt wording, watching API quota, finalizing
+  the "why AI here" pitch answer) before starting Phase 8 (Resilience —
+  staleness, conflicting sources, confidence).
