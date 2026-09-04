@@ -13,6 +13,9 @@ export default function Header() {
             <Link href="/dashboard" className="text-gray-600 hover:text-gray-900">
               Dashboard
             </Link>
+            <Link href="/watchlist" className="text-gray-600 hover:text-gray-900">
+              Watchlist
+            </Link>
             {/* user menu placeholder — sign-out lives here */}
             <UserButton />
           </SignedIn>

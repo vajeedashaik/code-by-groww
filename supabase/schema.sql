@@ -1,6 +1,6 @@
 -- ===========================================================================
--- Smart Market Watchlist — full schema (Phase 1)
--- Reference dump. This is 0001_init.sql + 0002_rls.sql concatenated.
+-- Smart Market Watchlist — full schema (Phase 1 + Phase 2)
+-- Reference dump. This is 0001_init.sql + 0002_rls.sql + 0003_*.sql concatenated.
 -- Apply the numbered files in supabase/migrations/ in order instead of this
 -- file when setting up a fresh project.
 -- ===========================================================================
@@ -14,6 +14,7 @@ create table if not exists public.watchlist_items (
   id           uuid primary key default gen_random_uuid(),
   user_id      text not null default (auth.jwt() ->> 'sub'),
   symbol       text not null,
+  company_name text,                              -- Phase 2: denormalised from search metadata
   thesis       text,
   target_price numeric,
   added_at     timestamptz not null default now(),

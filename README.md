@@ -1,10 +1,11 @@
 # Smart Market Watchlist
 
-Smart market watchlist web app. **Phase 1 — foundation only**: authentication
-(Clerk) and database schema (Supabase + RLS). No market data, watchlist UI, or
-scoring yet.
+Smart market watchlist web app. **Phases 1–2 complete**: authentication
+(Clerk), database schema (Supabase + RLS), and per-user watchlist CRUD with
+stock search. No live prices, scoring, digest, or thesis usage yet.
 
-Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk · Supabase.
+Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk · Supabase ·
+Finnhub (stock search).
 
 ## Prerequisites
 
@@ -27,10 +28,12 @@ Stack: Next.js 15 (App Router) · TypeScript · Tailwind CSS v4 · Clerk · Supa
 
 ### 3. Run the migrations
 
-In the Supabase **SQL Editor**, run these two files in order:
+In the Supabase **SQL Editor**, run these files in order:
 
 1. `supabase/migrations/0001_init.sql` — creates the five tables.
 2. `supabase/migrations/0002_rls.sql` — enables RLS and adds policies.
+3. `supabase/migrations/0003_watchlist_company_name.sql` — adds
+   `watchlist_items.company_name` (Phase 2).
 
 (`supabase/schema.sql` is the same content combined, for reference only.)
 
@@ -55,8 +58,10 @@ Supabase clients attach the Clerk session token via the `accessToken` option
 cp .env.example .env.local
 ```
 
-Fill every value in `.env.local` from steps 1–2. `.env.local` is gitignored —
-never commit real keys.
+Fill every value in `.env.local` from steps 1–2, plus a free
+[Finnhub](https://finnhub.io) API key as `FINNHUB_API_KEY` (Phase 2 stock
+search; search falls back to a static NSE list if it's missing). `.env.local`
+is gitignored — never commit real keys.
 
 ### 6. Run
 
@@ -75,10 +80,12 @@ Open <http://localhost:3000>.
 | `/sign-in`   | public        | Clerk sign-in                                      |
 | `/sign-up`   | public        | Clerk sign-up                                      |
 | `/dashboard` | authenticated | "Welcome, {name}" — proof auth works               |
+| `/watchlist` | authenticated | Stock search + per-user watchlist CRUD (Phase 2)    |
 | `/debug`     | authenticated | **temporary** — auth + RLS + DB round-trip check   |
+| `/api/search`| authenticated | JSON stock search (Finnhub + static NSE fallback)   |
 
-Unauthenticated requests to `/dashboard` or `/debug` redirect to sign-in
-(`middleware.ts`).
+Unauthenticated requests to `/dashboard`, `/watchlist`, or `/debug` redirect to
+sign-in (`middleware.ts`); `/api/search` returns `401`.
 
 ## Project layout
 
@@ -89,11 +96,17 @@ app/
   (protected)/            route group — auth.protect() gate
     dashboard/page.tsx
     debug/page.tsx
+    watchlist/page.tsx    watchlist view + add form
+    watchlist/actions.ts  add / remove server actions
+  api/search/route.ts     stock search (Finnhub + NSE fallback)
   sign-in/, sign-up/      Clerk components
 components/header.tsx     app name + user menu
+components/watchlist/     add-stock + remove-stock-button client components
+lib/hooks/use-debounce.ts  debounced value hook (search input)
+lib/stocks/              NSE fallback list, search types
 lib/supabase/             server / browser / admin clients
 types/database.ts         hand-written row types
-middleware.ts             Clerk middleware, protects /dashboard + /debug
+middleware.ts             Clerk middleware, protects /dashboard + /watchlist + /debug
 supabase/migrations/      versioned SQL — run in the dashboard
 ```
 
@@ -105,6 +118,19 @@ supabase/migrations/      versioned SQL — run in the dashboard
 | `npm run build`     | production build                  |
 | `npm run start`     | serve the production build        |
 | `npm run typecheck` | `tsc --noEmit`                    |
+
+## Phase 2 acceptance tests
+
+1. Search "Infosys" or "TCS" → relevant results appear.
+2. Search "zzxxqq123" → clean empty state, no crash.
+3. Add a stock with a thesis → shows in `/watchlist` with the thesis text.
+4. Add a stock with no thesis → shows with no thesis line (no "null"/"undefined").
+5. Add the same stock twice → clear message, no duplicate row in Supabase.
+6. Remove a stock → confirm step, then it's gone from `/watchlist` and the DB.
+7. User B's watchlist is empty and independent of User A's.
+8. Full reload → watchlist state persists.
+9. Break `FINNHUB_API_KEY` → search degrades to the static NSE list with a
+   warning; the rest of the app is unaffected.
 
 ## Phase 1 acceptance tests
 

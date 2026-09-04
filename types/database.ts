@@ -19,6 +19,7 @@ export interface Database {
           id: string;
           user_id: string;
           symbol: string;
+          company_name: string | null;
           thesis: string | null;
           target_price: number | null;
           added_at: string;
@@ -27,6 +28,7 @@ export interface Database {
           id?: string;
           user_id?: string; // defaults to auth.jwt()->>'sub'
           symbol: string;
+          company_name?: string | null;
           thesis?: string | null;
           target_price?: number | null;
           added_at?: string;
@@ -35,6 +37,7 @@ export interface Database {
           id?: string;
           user_id?: string;
           symbol?: string;
+          company_name?: string | null;
           thesis?: string | null;
           target_price?: number | null;
           added_at?: string;
