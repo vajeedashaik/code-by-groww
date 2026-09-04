@@ -105,7 +105,7 @@ Real, fixed issues:
 ### Phase 5 verification
 
 - `npm run typecheck` (`tsc --noEmit`) — exit 0, no output.
-- `npm run build` (`next build`) — compiled successfully, 9 routes +
+- `npm run build` (`next build`) — compiled successfully, 11 routes +
   middleware, 0 errors. `/api/watchlist/diffs` still listed as dynamic (ƒ).
 - `npm run verify:scoring` (new `tsx`-based script, no jest/vitest in this
   repo — same Phase 2-4 precedent) — all 13 checks pass, including the
