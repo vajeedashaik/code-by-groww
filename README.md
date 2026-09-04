@@ -1,3 +1,8 @@
+<img width="825" height="407" alt="image" src="https://github.com/user-attachments/assets/66cfd0ae-7bef-44d7-ae73-4477ab35bd69" />
+
+
+
+
 # Smart Market Watchlist
 
 A watchlist that remembers exactly what you last saw, and only interrupts you
