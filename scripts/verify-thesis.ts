@@ -4,6 +4,8 @@
  */
 import { parseVerdictResponse } from "../lib/thesis/parse-verdict";
 import { selectThesisChecksToRun, type ThesisCandidate } from "../lib/thesis/trigger";
+import { buildThesisPrompt } from "../lib/thesis/prompt";
+import type { Explanation } from "../lib/scoring/score";
 
 let failures = 0;
 function assert(condition: boolean, message: string) {
@@ -105,6 +107,43 @@ assert(selected.length === 5, "selectThesisChecksToRun: respects the cap");
 assert(
   selected.map((c) => c.symbol).join(",") === "S7,S6,S5,S4,S3",
   "selectThesisChecksToRun: picks highest score first",
+);
+
+// --- buildThesisPrompt -------------------------------------------------------
+const sampleExplanation: Explanation = {
+  price_change_pct: 6.2,
+  price_zscore: 2.1,
+  volume_ratio: 3.4,
+  market_change_pct: 0.5,
+  sector_change_pct: 0.8,
+  sector_used: "IT",
+  data_completeness: "full",
+};
+
+const promptWithNews = buildThesisPrompt(
+  "EV growth + margin improvement",
+  "Acme Motors",
+  [{ headline: "Acme beats delivery estimates", summary: "Q3 deliveries up 20%.", source: "Reuters", datetime: 1700000000 }],
+  sampleExplanation,
+);
+assert(promptWithNews.contents.length === 1, "buildThesisPrompt: produces one content block");
+assert(
+  promptWithNews.contents[0].parts[0].text.includes("EV growth + margin improvement"),
+  "buildThesisPrompt: includes the thesis text",
+);
+assert(
+  promptWithNews.contents[0].parts[0].text.includes("Acme beats delivery estimates"),
+  "buildThesisPrompt: includes news headlines",
+);
+assert(
+  promptWithNews.generationConfig.responseMimeType === "application/json",
+  "buildThesisPrompt: forces JSON output via responseMimeType",
+);
+
+const promptNoNews = buildThesisPrompt("EV growth", "Acme Motors", [], sampleExplanation);
+assert(
+  promptNoNews.contents[0].parts[0].text.includes("No recent news"),
+  "buildThesisPrompt: states plainly when there is no news, instead of omitting the gap",
 );
 
 if (failures > 0) {
