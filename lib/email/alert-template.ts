@@ -1,13 +1,8 @@
 import type { AlertType } from "@/lib/alerts/types";
+import { formatPrice } from "@/lib/market-data/currency";
 
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 2,
-});
-
-function formatValue(alertType: AlertType, value: number): string {
-  return alertType === "volume_above" ? value.toLocaleString("en-IN") : inr.format(value);
+function formatValue(symbol: string, alertType: AlertType, value: number): string {
+  return alertType === "volume_above" ? value.toLocaleString("en-IN") : formatPrice(symbol, value);
 }
 
 const COPY: Record<AlertType, { verb: string; noun: string }> = {
@@ -35,7 +30,7 @@ export function buildAlertEmailHtml(params: {
   const { verb, noun } = COPY[alertType];
   const name = companyName ? `${symbol} (${companyName})` : symbol;
 
-  const subject = `${symbol} ${noun} alert — ${verb} ${formatValue(alertType, threshold)}`;
+  const subject = `${symbol} ${noun} alert — ${verb} ${formatValue(symbol, alertType, threshold)}`;
 
   const html = `
 <div style="background:#050506;padding:32px 16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif;">
@@ -53,11 +48,11 @@ export function buildAlertEmailHtml(params: {
     <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
       <tr>
         <td style="padding:8px 0;color:rgba(255,255,255,0.4);font-size:13px;">Your threshold</td>
-        <td style="padding:8px 0;color:#ffffff;font-size:13px;text-align:right;">${formatValue(alertType, threshold)}</td>
+        <td style="padding:8px 0;color:#ffffff;font-size:13px;text-align:right;">${formatValue(symbol, alertType, threshold)}</td>
       </tr>
       <tr style="border-top:1px solid rgba(255,255,255,0.08);">
         <td style="padding:8px 0;color:rgba(255,255,255,0.4);font-size:13px;">Current ${noun}</td>
-        <td style="padding:8px 0;color:#00d084;font-size:13px;font-weight:600;text-align:right;">${formatValue(alertType, currentValue)}</td>
+        <td style="padding:8px 0;color:#00d084;font-size:13px;font-weight:600;text-align:right;">${formatValue(symbol, alertType, currentValue)}</td>
       </tr>
     </table>
     <a href="${dashboardUrl}" style="display:inline-block;background:linear-gradient(155deg,#5bffc0,#00a568);color:#000000;font-weight:600;font-size:14px;text-decoration:none;padding:12px 24px;border-radius:999px;">

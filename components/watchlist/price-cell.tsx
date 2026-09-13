@@ -1,21 +1,18 @@
 import StalenessBadge from "@/components/watchlist/staleness-badge";
+import { formatPrice } from "@/lib/market-data/currency";
 
 /**
  * Renders a watchlist row's price. Server component, no client JS.
  *
- *   - price + prevClose present -> "₹1,250.40" and a coloured "+1.24%"
+ *   - price + prevClose present -> "₹1,250.40"/"$1,250.40" (currency
+ *     inferred from the symbol's exchange suffix, see
+ *     lib/market-data/currency.ts) and a coloured "+1.24%"
  *   - price present, no usable prevClose -> just the price
  *   - no price -> muted "Fetching price…" (symbol added but the job hasn't run)
  *
  * Phase 8: also renders the staleness badge for `fetchedAt` next to the
  * price — neutral for FRESH/DELAYED, a calm warm tone for STALE.
  */
-
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 2,
-});
 
 export function percentChange(
   price: number,
@@ -28,10 +25,12 @@ export function percentChange(
 }
 
 export default function PriceCell({
+  symbol,
   price,
   prevClose,
   fetchedAt,
 }: {
+  symbol: string;
   price: number | null | undefined;
   prevClose: number | null | undefined;
   fetchedAt?: string | null;
@@ -54,7 +53,7 @@ export default function PriceCell({
 
   return (
     <div className="text-right">
-      <div className="font-display font-medium tabular-nums text-white">{inr.format(price)}</div>
+      <div className="font-display font-medium tabular-nums text-white">{formatPrice(symbol, price)}</div>
       {pctLabel && (
         <div className={`text-xs tabular-nums ${pctColor}`}>{pctLabel}</div>
       )}

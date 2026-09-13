@@ -4,12 +4,7 @@ import { useState } from "react";
 import { useWatchlistDiffs } from "@/components/watchlist/diff-panel";
 import { buildTimeMachineSummary } from "@/lib/digest/time-machine";
 import { formatElapsed } from "@/lib/watchlist/format-elapsed";
-
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 2,
-});
+import { formatPrice } from "@/lib/market-data/currency";
 
 function pctText(v: number | null): string {
   if (v === null) return "—";
@@ -60,8 +55,8 @@ export default function TimeMachine({ symbol }: { symbol: string }) {
               <tbody className="text-white/60">
                 <tr>
                   <td className="pr-3 font-medium text-white/40">Price</td>
-                  <td>{diff.priceThen !== null ? inr.format(diff.priceThen) : "—"}</td>
-                  <td>{diff.priceNow !== null ? inr.format(diff.priceNow) : "—"}</td>
+                  <td>{diff.priceThen !== null ? formatPrice(symbol, diff.priceThen) : "—"}</td>
+                  <td>{diff.priceNow !== null ? formatPrice(symbol, diff.priceNow) : "—"}</td>
                 </tr>
                 <tr>
                   <td className="pr-3 font-medium text-white/40">Volume</td>
