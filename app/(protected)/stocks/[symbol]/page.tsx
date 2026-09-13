@@ -10,10 +10,9 @@ import AnalystRatingsChart from "@/components/stocks/analyst-ratings-chart";
 import SentimentCard from "@/components/stocks/sentiment-card";
 import InsightsUnavailable from "@/components/stocks/insights-unavailable";
 import GlassCard from "@/components/ui/glass-card";
+import { formatPrice } from "@/lib/market-data/currency";
 
 export const dynamic = "force-dynamic";
-
-const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
 
 function percentChange(price: number, prevClose: number | null): number | null {
   if (prevClose === null || prevClose === 0) return null;
@@ -70,7 +69,7 @@ export default async function StockDetailPage({
         {latest && (
           <div className="text-right">
             <div className="font-display text-2xl font-semibold tabular-nums text-white">
-              {inr.format(latest.price)}
+              {formatPrice(symbol, latest.price)}
             </div>
             {pct !== null && (
               <div className={`text-sm tabular-nums ${pctColor}`}>

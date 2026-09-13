@@ -44,3 +44,4 @@ jobs:
       - run: npm run verify:thesis
       - run: npm run verify:reconcile
       - run: npm run verify:alerts
+      - run: npm run verify:currency

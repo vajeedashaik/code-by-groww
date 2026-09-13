@@ -1,11 +1,6 @@
 import type { Confidence, Explanation } from "@/lib/scoring/score";
 import type { ThesisField } from "@/lib/thesis/types";
-
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 2,
-});
+import { formatPrice } from "@/lib/market-data/currency";
 
 /**
  * Full evidence trail for one flagged stock, labeled plainly — not raw
@@ -24,12 +19,14 @@ const inr = new Intl.NumberFormat("en-IN", {
  * row itself gets a one-line note explaining why it reads "Low."
  */
 export default function WhyFlaggedDetail({
+  symbol,
   explanation,
   confidence,
   thesis,
   currentPrice,
   usedSource,
 }: {
+  symbol: string;
   explanation: Explanation;
   confidence: Confidence;
   thesis?: ThesisField | null;
@@ -87,9 +84,9 @@ export default function WhyFlaggedDetail({
           <p className="mt-1 text-xs text-warn/80">
             The price sources disagreed:{" "}
             {usedSource ?? "the primary source"} reported{" "}
-            {currentPrice != null ? inr.format(currentPrice) : "a different value"}, while{" "}
+            {currentPrice != null ? formatPrice(symbol, currentPrice) : "a different value"}, while{" "}
             {explanation.alt_source ?? "the alternate source"} reported{" "}
-            {explanation.alt_price !== null ? inr.format(explanation.alt_price) : "a different value"}.
+            {explanation.alt_price !== null ? formatPrice(symbol, explanation.alt_price) : "a different value"}.
             We used {usedSource ?? "the primary source"}&apos;s price per our documented
             source-priority rule (Yahoo, then Finnhub) rather than averaging the two or hiding the
             disagreement.

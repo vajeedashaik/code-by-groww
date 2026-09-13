@@ -221,6 +221,7 @@ export default async function WatchlistPage() {
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-2">
                       <PriceCell
+                        symbol={item.symbol}
                         price={snap?.price}
                         prevClose={prevCloseBySymbol.get(item.symbol)}
                         fetchedAt={snap?.fetched_at}

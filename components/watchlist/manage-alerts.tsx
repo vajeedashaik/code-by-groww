@@ -4,11 +4,10 @@ import { useState, useTransition } from "react";
 import { createAlert, removeAlert, toggleAlert } from "@/app/(protected)/watchlist/alert-actions";
 import { ALERT_TYPE_LABEL, type AlertRow, type AlertType } from "@/lib/alerts/types";
 import Badge from "@/components/ui/badge";
+import { formatPrice } from "@/lib/market-data/currency";
 
-const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 2 });
-
-function formatThreshold(alertType: AlertType, value: number): string {
-  return alertType === "volume_above" ? value.toLocaleString("en-IN") : inr.format(value);
+function formatThreshold(symbol: string, alertType: AlertType, value: number): string {
+  return alertType === "volume_above" ? value.toLocaleString("en-IN") : formatPrice(symbol, value);
 }
 
 /**
@@ -67,7 +66,7 @@ export default function ManageAlerts({
               {alerts.map((a) => (
                 <li key={a.id} className="flex items-center justify-between gap-2 text-xs">
                   <span className={a.active ? "text-white/70" : "text-white/30 line-through"}>
-                    {ALERT_TYPE_LABEL[a.alertType]} {formatThreshold(a.alertType, a.threshold)}
+                    {ALERT_TYPE_LABEL[a.alertType]} {formatThreshold(symbol, a.alertType, a.threshold)}
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     <button

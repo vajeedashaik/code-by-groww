@@ -12,12 +12,7 @@ import StalenessBadge from "@/components/watchlist/staleness-badge";
 import { BorderBeam } from "@/components/magicui/border-beam";
 import CandlestickChart from "@/components/charts/candlestick-chart";
 import type { ThesisVerdictCategory } from "@/lib/thesis/types";
-
-const inr = new Intl.NumberFormat("en-IN", {
-  style: "currency",
-  currency: "INR",
-  maximumFractionDigits: 2,
-});
+import { formatPrice } from "@/lib/market-data/currency";
 
 type ThesisStatusKey = ThesisVerdictCategory | "pending";
 
@@ -91,7 +86,7 @@ export default function StockCard({
         </div>
         <div className="shrink-0 text-right">
           {diff.priceNow !== null && (
-            <div className="font-display font-medium tabular-nums text-white">{inr.format(diff.priceNow)}</div>
+            <div className="font-display font-medium tabular-nums text-white">{formatPrice(item.symbol, diff.priceNow)}</div>
           )}
           <div className={`text-xs tabular-nums ${pctColor}`}>{pctLabel}</div>
           <div className="mt-1">
@@ -124,6 +119,7 @@ export default function StockCard({
             </summary>
             <div className="pt-3">
               <WhyFlaggedDetail
+                symbol={item.symbol}
                 explanation={diff.explanation}
                 confidence={diff.confidence}
                 thesis={diff.thesis}
